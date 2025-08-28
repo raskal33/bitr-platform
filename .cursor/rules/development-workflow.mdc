@@ -1,0 +1,27 @@
+Rule 1: Development Environment Setup
+- Backend runs on localhost, production database on neon.tech
+- Use MCP to connect to the database for queries and migrations
+- Frontend is in separate directory: `/home/leon/predict-linux`
+- Use `npm run lint` and `npx tsc` for frontend validation instead of full build
+
+Rule 2: Testing and Validation
+- Run `npm run lint` for frontend code quality checks
+- Use `npx tsc` for TypeScript compilation checks
+- Test backend with `npm run backend:dev` for development
+- Use `npm run test` in solidity directory for contract testing
+
+Rule 3: Database Operations
+- Use MCP tools for database queries and migrations
+- Always test migrations on temporary branches first
+- Use `prepare_database_migration` for schema changes
+- Verify changes before applying to main branch
+
+Rule 4: Smart Contract Development
+- Compile contracts with `cd solidity && npx hardhat compile`
+- Test contracts with `cd solidity && npx hardhat test`
+- Deploy with Hardhat Ignition modules
+- Use `npm run deploy:somnia` for production deployment
+description:
+globs:
+alwaysApply: false
+---

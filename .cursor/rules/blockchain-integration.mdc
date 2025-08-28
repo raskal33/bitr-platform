@@ -1,0 +1,46 @@
+Rule 1: Smart Contract Development
+- Follow Solidity best practices and security patterns
+- Use OpenZeppelin contracts for standard functionality
+- Implement proper access control and modifiers
+- Test thoroughly with comprehensive test suites
+
+Rule 2: Event Indexing
+- Index all important contract events for off-chain processing
+- Use proper event filtering to reduce unnecessary data
+- Handle blockchain reorganizations gracefully
+- Implement retry logic for failed indexing operations
+
+Rule 3: Oracle Integration
+- Implement proper validation for oracle data sources
+- Use multiple data sources for critical outcomes
+- Handle oracle failures with fallback mechanisms
+- Implement proper bonding and challenge mechanisms
+
+Rule 4: Gas Optimization
+- Optimize contract functions for gas efficiency
+- Use batch operations where possible
+- Implement proper storage patterns
+- Monitor gas costs in production deployments
+
+Rule 5: Things to know:
+
+BACKEND_URL=https://bitredict-backend.fly.dev
+FRONTEND_URL=https://bitredict.vercel.app 
+
+SOMNIA_RPC_URL=https://dream-rpc.somnia.network/
+SOMNIA_CHAIN_ID=50312
+PROVIDER_URL=https://dream-rpc.somnia.network/
+
+# Contract Addresses (update these after deployment)
+BITR_TOKEN_ADDRESS=0x4b10fBFFDEE97C42E29899F47A2ECD30a38dBf2C
+GUIDED_ORACLE_ADDRESS=0x2103cCfc9a15F2876765487F594481D5f8EC160a
+BITREDICT_POOL_ADDRESS=0x6C9DCB0F967fbAc62eA82d99BEF8870b4272919a
+OPTIMISTIC_ORACLE_ADDRESS=0x9E53d44aD3f614BA53F3B21EDF9fcE79a72238b2
+BITR_FAUCET_ADDRESS=0x1656712131BB07dDE6EeC7D88757Db24782cab71
+STAKING_CONTRACT_ADDRESS=0xE803DcA8Dee0aAB6aa43ac4c95B8771f73FEFeD2
+ODDYSSEY_ADDRESS=0x9f9D719041C8F0EE708440f15AE056Cd858DCF4e
+
+description:
+globs:
+alwaysApply: false
+---

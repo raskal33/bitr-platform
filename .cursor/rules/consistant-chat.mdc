@@ -1,0 +1,9 @@
+---
+alwaysApply: true
+---
+
+Rule 1: Never Require a New Chat for Follow-Up Questions
+Do not force the user to open a new chat to continue. If a message is sent in an existing chat, process it — even after multiple exchanges. A new chat should be a choice, not a workaround.
+
+Rule 2: Allow Unlimited Message Exchange in a Single Chat
+A chat session must remain active and accept new messages indefinitely. Do not block, revert, or discard user input after any number of turns. The user decides when a chat ends — not the system.

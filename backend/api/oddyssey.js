@@ -1,1206 +1,468 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/db');
-const OddysseyMatchSelector = require('../services/oddyssey-match-selector');
-const PersistentDailyGameManager = require('../services/persistent-daily-game-manager');
-const SportMonksService = require('../services/sportmonks');
+const { asyncHandler, validateDateParam } = require('../utils/validation');
 const { rateLimitMiddleware } = require('../config/redis');
-const {
-  validateDateParam,
-  asyncHandler,
-  createErrorResponse,
-  createSuccessResponse
-} = require('../utils/validation');
+const { serializeBigInts } = require('../utils/bigint-serializer');
 
-// Initialize the services
-const oddysseyMatchSelector = new OddysseyMatchSelector();
-const persistentDailyGameManager = new PersistentDailyGameManager();
-const sportMonksService = new SportMonksService();
+// Simple in-memory cache to reduce database load
+const cache = new Map();
+const CACHE_TTL = 30 * 1000; // 30 seconds
+
+function getCacheKey(req) {
+  return `${req.method}:${req.path}:${JSON.stringify(req.query)}:${JSON.stringify(req.body)}`;
+}
+
+function cacheMiddleware(ttl = CACHE_TTL) {
+  return (req, res, next) => {
+    const key = getCacheKey(req);
+    const cached = cache.get(key);
+    
+    if (cached && Date.now() - cached.timestamp < ttl) {
+      console.log(`🚀 Cache hit for ${key}`);
+      res.set({
+        'Cache-Control': `public, max-age=${Math.floor(ttl / 1000)}`,
+        'X-Cache-TTL': ttl.toString(),
+        'X-Cache-Status': 'HIT'
+      });
+      return res.json(cached.data);
+    }
+    
+    // Override res.json to cache the response
+    const originalJson = res.json;
+    res.json = function(data) {
+      if (res.statusCode === 200) {
+        cache.set(key, { data, timestamp: Date.now() });
+        // Clean old cache entries periodically
+        if (cache.size > 100) {
+          const now = Date.now();
+          for (const [k, v] of cache.entries()) {
+            if (now - v.timestamp > ttl * 2) {
+              cache.delete(k);
+            }
+          }
+        }
+        // Add cache headers for frontend
+        res.set({
+          'Cache-Control': `public, max-age=${Math.floor(ttl / 1000)}`,
+          'X-Cache-TTL': ttl.toString(),
+          'X-Cache-Status': 'MISS'
+        });
+      }
+      return originalJson.call(this, data);
+    };
+    
+    next();
+  };
+}
+
+/**
+ * Standardized data transformation function
+ * Ensures all API responses use consistent camelCase structure
+ */
+function transformMatchData(match, index = 0) {
+  return {
+    id: match.id || match.fixture_id,
+    fixture_id: match.fixture_id || match.id,
+    home_team: match.home_team || match.homeTeam || 'Unknown Team',
+    away_team: match.away_team || match.awayTeam || 'Unknown Team', 
+    league_name: match.league_name || match.leagueName || 'Unknown League',
+    match_date: match.match_date || match.matchDate,
+    home_odds: parseFloat(match.home_odds || match.homeOdds) || 2.0,
+    draw_odds: parseFloat(match.draw_odds || match.drawOdds) || 3.0,
+    away_odds: parseFloat(match.away_odds || match.awayOdds) || 2.5,
+    over_odds: parseFloat(match.over_25_odds || match.over_odds || match.overOdds) || 2.0,
+    under_odds: parseFloat(match.under_25_odds || match.under_odds || match.underOdds) || 1.8,
+    market_type: match.market_type || match.marketType || "1x2_ou25",
+    display_order: match.display_order || match.displayOrder || index + 1,
+    status: match.status,
+    startTime: match.startTime || (match.match_date ? Math.floor(new Date(match.match_date).getTime() / 1000) : Math.floor(Date.now() / 1000))
+  };
+}
+
+/**
+ * Standardized response wrapper
+ * Ensures all API responses have consistent structure
+ */
+function createStandardResponse(data, meta = {}) {
+  return {
+    success: true,
+    data: data,
+    meta: {
+      timestamp: new Date().toISOString(),
+      ...meta
+    }
+  };
+}
 
 // Get current Oddyssey matches (uses persistent storage only)
-router.get('/matches', validateDateParam('date', false, true), asyncHandler(async (req, res) => {
+router.get('/matches', cacheMiddleware(30000), validateDateParam('date', false, true), asyncHandler(async (req, res) => {
   try {
     const { date } = req.query;
-
-    // Get current date
-    const today = new Date().toISOString().split('T')[0];
-    const targetDate = date || today;
-
-    console.log(`🎯 Fetching Oddyssey matches for ${targetDate} (using persistent storage)`);
-
-    // Get the current active cycle directly
-    const cycleQuery = `
-      SELECT cycle_id, matches_data, cycle_start_time
-      FROM oracle.oddyssey_cycles 
-      WHERE is_resolved = false
-      ORDER BY cycle_id DESC
-      LIMIT 1
-    `;
-    const cycleResult = await db.query(cycleQuery);
-  
-    if (cycleResult.rows.length === 0) {
-      console.log(`⚠️ No active cycle found`);
-      return res.json({
-        success: true,
-        data: {
-          today: {
-            date: targetDate,
-            matches: [],
-            count: 0
-          },
-          yesterday: {
-            date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            matches: [],
-            count: 0
-          }
-        },
-        meta: {
-          total_matches: 0,
-          expected_matches: 10,
-          cycle_id: null,
-          source: 'direct_cycle_query',
-          operation: 'get_matches'
-        },
-        message: 'No active cycle found'
-      });
-    }
-
-    const cycle = cycleResult.rows[0];
-    console.log(`📊 Using cycle ${cycle.cycle_id} for ${targetDate}`);
-
-    // Parse matches_data from JSONB - it contains objects with id property
-    let fixtureIds = [];
-    try {
-      if (Array.isArray(cycle.matches_data)) {
-        // Extract fixture IDs from objects that have an 'id' property
-        fixtureIds = cycle.matches_data
-          .filter(match => match && match.id)
-          .map(match => match.id.toString());
-      } else if (typeof cycle.matches_data === 'string') {
-        // Try to parse as JSON if it's a string
-        const parsed = JSON.parse(cycle.matches_data);
-        if (Array.isArray(parsed)) {
-          fixtureIds = parsed
-            .filter(match => match && match.id)
-            .map(match => match.id.toString());
-        }
-      } else {
-        fixtureIds = [];
-      }
-      console.log(`📊 Parsed ${fixtureIds.length} fixture IDs from cycle data: ${fixtureIds.join(', ')}`);
-    } catch (error) {
-      console.error('❌ Error parsing matches_data:', error);
-      fixtureIds = [];
-    }
-
-    if (fixtureIds.length === 0) {
-      console.log(`⚠️ No fixture IDs found in cycle ${cycle.cycle_id}`);
-      return res.json({
-        success: true,
-        data: {
-          today: {
-            date: targetDate,
-            matches: [],
-            count: 0
-          },
-          yesterday: {
-            date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            matches: [],
-            count: 0
-          }
-        },
-        meta: {
-          total_matches: 0,
-          expected_matches: 10,
-          cycle_id: cycle.cycle_id,
-          source: 'direct_cycle_query',
-          operation: 'get_matches'
-        },
-        message: 'No fixture IDs found in cycle'
-      });
-    }
-
-    console.log(`🔍 Looking for fixtures with IDs: ${fixtureIds.join(', ')}`);
+    const targetDate = date || new Date().toISOString().split('T')[0];
     
-    // Get fixture details for all matches
-    const fixtureQuery = `
-      SELECT id, home_team, away_team, league_name, match_date
-      FROM oracle.fixtures 
-      WHERE id = ANY($1)
-    `;
-    const fixtureResult = await db.query(fixtureQuery, [fixtureIds]);
-    const fixtures = fixtureResult.rows.reduce((acc, fixture) => {
-      acc[fixture.id] = fixture;
-      return acc;
-    }, {});
+    console.log(`🎯 Fetching Oddyssey matches for date: ${targetDate}`);
 
-    // Get odds for all fixtures - ONLY FULL TIME ODDS (market_id = 1 for 1X2, market_id = 80 for Over/Under)
-    const oddsQuery = `
-      SELECT fixture_id, label, value
-      FROM oracle.fixture_odds 
-      WHERE fixture_id = ANY($1)
-      AND (
-        (market_id = '1' AND label IN ('Home', 'Draw', 'Away')) OR
-        (market_id = '80' AND label IN ('Over', 'Under') AND total = '2.500000')
-      )
+    // Get today's matches from oracle.daily_game_matches table
+    const todayMatchesQuery = `
+      SELECT 
+        fixture_id as id,
+        home_team,
+        away_team,
+        league_name,
+        match_date,
+        home_odds,
+        draw_odds,
+        away_odds,
+        over_25_odds,
+        under_25_odds,
+        display_order
+      FROM oracle.daily_game_matches
+      WHERE game_date = $1
+      ORDER BY display_order ASC
     `;
-    const oddsResult = await db.query(oddsQuery, [fixtureIds]);
-    const odds = oddsResult.rows.reduce((acc, odd) => {
-      if (!acc[odd.fixture_id]) {
-        acc[odd.fixture_id] = {};
-      }
-      acc[odd.fixture_id][odd.label.toLowerCase()] = parseFloat(odd.value);
-      return acc;
-    }, {});
-
-    // Transform fixture IDs to matches with odds
-    const matches = fixtureIds.map((fixtureId, index) => {
-      const fixture = fixtures[fixtureId] || {};
-      const fixtureOdds = odds[fixtureId] || {};
-      
-      return {
-        id: fixtureId,
-        fixture_id: fixtureId,
-        home_team: fixture.home_team || 'Unknown Team',
-        away_team: fixture.away_team || 'Unknown Team',
-        league_name: fixture.league_name || 'Unknown League',
-        match_date: fixture.match_date || new Date().toISOString(),
-        home_odds: fixtureOdds.home || 2.0,
-        draw_odds: fixtureOdds.draw || 3.0,
-        away_odds: fixtureOdds.away || 2.5,
-        over_25_odds: fixtureOdds.over || 2.0,
-        under_25_odds: fixtureOdds.under || 1.8,
-        display_order: index + 1,
-        cycle_id: cycle.cycle_id
-      };
-    });
+    
+    const todayResult = await db.query(todayMatchesQuery, [targetDate]);
+    const matches = todayResult.rows;
 
     if (matches.length > 0) {
       console.log(`✅ Found ${matches.length} matches for ${targetDate}`);
 
-      // Transform data to match frontend expectations
-      const transformedMatches = matches.map((match, index) => ({
-        id: match.id,
-        fixture_id: match.fixture_id,
-        home_team: match.home_team,
-        away_team: match.away_team,
-        league_name: match.league_name,
-        match_date: match.match_date,
-        home_odds: match.home_odds,
-        draw_odds: match.draw_odds,
-        away_odds: match.away_odds,
-        over_odds: match.over_25_odds,
-        under_odds: match.under_25_odds,
-        market_type: "1x2_ou25",
-        display_order: match.display_order
-      }));
+      // Transform data to match frontend expectations (consistent camelCase)
+      const transformedMatches = matches.map((match, index) => transformMatchData(match, index));
 
-      return res.json({
-        success: true,
-        data: {
-          today: {
-            date: targetDate,
-            matches: transformedMatches,
-            count: transformedMatches.length
-          },
-          yesterday: {
-            date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            matches: [],
-            count: 0
-          }
-        },
-        meta: {
-          total_matches: transformedMatches.length,
-          expected_matches: 10,
-          cycle_id: cycle.cycle_id,
-          source: 'direct_cycle_query',
-          operation: 'get_matches'
-        },
-        message: `Found ${transformedMatches.length} matches for ${targetDate}`
+      // Get yesterday's matches from previous cycle
+      const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      let yesterdayMatches = [];
+      
+      try {
+        // Get yesterday's matches from oracle.daily_game_matches table (much simpler!)
+        const yesterdayMatchesQuery = `
+          SELECT 
+            fixture_id as id,
+            home_team,
+            away_team,
+            league_name,
+            match_date,
+            home_odds,
+            draw_odds,
+            away_odds,
+            over_25_odds,
+            under_25_odds
+          FROM oracle.daily_game_matches
+          WHERE game_date = $1
+          ORDER BY display_order ASC
+        `;
+        
+        const yesterdayFixturesResult = await db.query(yesterdayMatchesQuery, [yesterdayDate]);
+            
+        if (yesterdayFixturesResult.rows.length > 0) {
+          yesterdayMatches = yesterdayFixturesResult.rows.map((fixture, index) => transformMatchData(fixture, index));
+        }
+      } catch (error) {
+        console.error('❌ Error fetching yesterday matches:', error);
+        yesterdayMatches = [];
+      }
+
+      // Add cache control headers to prevent hydration mismatches
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       });
+
+      const response = createStandardResponse({
+        today: {
+          date: targetDate,
+          matches: transformedMatches,
+          count: transformedMatches.length
+        },
+        yesterday: {
+          date: yesterdayDate,
+          matches: yesterdayMatches,
+          count: yesterdayMatches.length
+        }
+      }, {
+        totalMatches: transformedMatches.length + yesterdayMatches.length,
+        expectedMatches: 10,
+        source: "persistent_storage",
+        operation: "get_matches"
+      });
+
+      return res.json(serializeBigInts(response));
     } else {
       console.log(`⚠️ No matches found for ${targetDate}`);
-      return res.json({
-        success: true,
-        data: {
-          today: {
-            date: targetDate,
-            matches: [],
-            count: 0
-          },
-          yesterday: {
-            date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            matches: [],
-            count: 0
-          }
+      
+      const response = createStandardResponse({
+        today: {
+          date: targetDate,
+          matches: [],
+          count: 0
         },
-        meta: {
-          total_matches: 0,
-          expected_matches: 10,
-          cycle_id: cycle.cycle_id,
-          source: 'direct_cycle_query',
-          operation: 'get_matches'
-        },
-        message: 'No matches found'
+        yesterday: {
+          date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          matches: [],
+          count: 0
+        }
+      }, {
+        totalMatches: 0,
+        expectedMatches: 10,
+        source: "persistent_storage",
+        operation: "get_matches"
       });
+
+      return res.json(response);
     }
   } catch (error) {
     console.error('❌ Error in /matches endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'An unexpected error occurred',
-        details: {
-          timestamp: new Date().toISOString(),
-          path: '/matches',
-          method: 'GET'
-        }
-      }
-    });
-  }
-}));
-
-// Debug endpoint to check cycles
-router.get('/debug-cycles', asyncHandler(async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Get all cycles
-    const allCyclesQuery = `
-      SELECT cycle_id, cycle_start_time, is_resolved, matches_count, 
-             DATE(cycle_start_time) as cycle_date,
-             DATE(cycle_start_time AT TIME ZONE 'UTC') as cycle_date_utc
-      FROM oracle.oddyssey_cycles 
-      ORDER BY cycle_id DESC
-      LIMIT 10
-    `;
-    const allCycles = await db.query(allCyclesQuery);
-    
-    // Get cycles for today
-    const todayCyclesQuery = `
-      SELECT cycle_id, cycle_start_time, is_resolved, matches_count
-      FROM oracle.oddyssey_cycles 
-      WHERE DATE(cycle_start_time AT TIME ZONE 'UTC') = DATE($1)
-      ORDER BY cycle_id DESC
-    `;
-    const todayCycles = await db.query(todayCyclesQuery, [today]);
-    
-    res.json({
-      success: true,
-      data: {
-        today: today,
-        all_cycles: allCycles.rows,
-        today_cycles: todayCycles.rows
-      }
-    });
-  } catch (error) {
-    console.error('Error in debug-cycles:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-}));
-
-// Select and persist daily matches (admin endpoint)
-router.post('/select-and-persist-matches', validateDateParam('date', false, false), asyncHandler(async (req, res) => {
-  const { date } = req.body;
-
-  const targetDate = date || new Date().toISOString().split('T')[0];
-
-  console.log(`🎯 Selecting and persisting daily matches for ${targetDate}...`);
-
-  // Use Persistent Daily Game Manager to select and persist matches
-  const result = await persistentDailyGameManager.selectAndPersistDailyMatches(targetDate);
-
-  res.json(createSuccessResponse(
-    {
-      date: result.date,
-      matchCount: result.matchCount,
-      cycleId: result.cycleId,
-      overwriteProtected: result.overwriteProtected
-    },
-    {
-      operation: 'select_and_persist_matches'
-    },
-    result.message
-  ));
-}));
-
-// Validate match count for a date (admin endpoint)
-router.get('/validate-matches/:date?', validateDateParam('date', false, true), asyncHandler(async (req, res) => {
-  const { date } = req.params;
-
-  const targetDate = date || new Date().toISOString().split('T')[0];
-
-  console.log(`🔍 Validating match count for ${targetDate}...`);
-
-  // Use Persistent Daily Game Manager to validate matches
-  const result = await persistentDailyGameManager.validateMatchCount(targetDate);
-
-  res.json(createSuccessResponse(
-    result,
-    {
-      operation: 'validate_matches'
-    }
-  ));
-}));
-
-// Populate Oddyssey daily game matches (admin endpoint) - DEPRECATED
-router.post('/populate-matches', async (req, res) => {
-  try {
-    console.log('⚠️ DEPRECATED: Use /select-and-persist-matches instead');
-
-    // Redirect to new endpoint
-    const targetDate = new Date().toISOString().split('T')[0];
-    const result = await persistentDailyGameManager.selectAndPersistDailyMatches(targetDate);
-
-    res.json({
-      success: result.success,
-      message: `DEPRECATED ENDPOINT - ${result.message}`,
-      data: {
-        today: result.matchCount
-      }
-    });
-
-  } catch (error) {
-    console.error('Error in deprecated populate matches:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to populate Oddyssey matches (deprecated endpoint)'
-    });
-  }
-});
-
-// Test endpoint to check database tables (admin endpoint)
-router.get('/test-db', asyncHandler(async (req, res) => {
-  try {
-    console.log('🔍 Testing database tables...');
-
-    // Check if oddyssey schema exists
-    const schemaCheck = await db.query(`
-      SELECT schema_name 
-      FROM information_schema.schemata 
-      WHERE schema_name = 'oddyssey'
-    `);
-
-    // Check if daily_game_matches table exists
-    const tableCheck = await db.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'oddyssey' 
-      AND table_name = 'daily_game_matches'
-    `);
-
-    // Check fixtures count
-    const fixturesCount = await db.query('SELECT COUNT(*) FROM oracle.fixtures');
-
-    // Check if we have fixtures for today only
-    const today = new Date().toISOString().split('T')[0];
-
-    const todayFixtures = await db.query(`
-      SELECT COUNT(*) FROM oracle.fixtures 
-      WHERE DATE(match_date) = $1
-      AND league_name NOT ILIKE '%women%'
-      AND league_name NOT ILIKE '%female%'
-      AND league_name NOT ILIKE '%ladies%'
-      AND home_team NOT ILIKE '%women%'
-      AND away_team NOT ILIKE '%women%'
-      AND home_team NOT ILIKE '%female%'
-      AND away_team NOT ILIKE '%female%'
-      AND home_team NOT ILIKE '%ladies%'
-      AND away_team NOT ILIKE '%ladies%'
-    `, [today]);
-
-    res.json(createSuccessResponse(
-      {
-        oddyssey_schema_exists: schemaCheck.rows.length > 0,
-        daily_game_matches_exists: tableCheck.rows.length > 0,
-        total_fixtures: parseInt(fixturesCount.rows[0].count),
-        today_fixtures: parseInt(todayFixtures.rows[0].count),
-        today_date: today
-      },
-      {
-        operation: 'database_test'
-      }
-    ));
-  } catch (error) {
-    console.error('Error in test-db endpoint:', error);
-    res.status(500).json(createErrorResponse(
-      'Database test failed',
-      {
-        operation: 'database_test',
-        error: error.message
-      }
-    ));
-  }
-}));
-
-// Debug endpoint to check contract status
-router.get('/contract-status', asyncHandler(async (req, res) => {
-  try {
-    console.log('🔍 Checking Oddyssey contract status...');
-    
-    const Web3Service = require('../services/web3-service');
-    const web3Service = new Web3Service();
-    const contract = await web3Service.getOddysseyContract();
-    
-    // Get current cycle ID
-    const currentCycleId = await contract.dailyCycleId();
-    console.log(`📊 Current cycle ID: ${currentCycleId}`);
-    
-    // Get cycle status - returns tuple: (exists, endTime, prizePool, isResolved, slipCount)
-    const cycleStatus = await contract.getCycleStatus(currentCycleId);
-    console.log(`📊 Cycle status:`, cycleStatus);
-    
-    // Destructure the tuple
-    const [exists, endTime, prizePool, isResolved, slipCount] = cycleStatus;
-    
-    // Try to get matches from contract
-    let contractMatches = [];
-    try {
-      contractMatches = await contract.getDailyMatches(currentCycleId);
-      console.log(`📊 Contract matches: ${contractMatches.length}`);
-    } catch (error) {
-      console.error('❌ Error getting matches from contract:', error.message);
-    }
-    
-    // Get matches from database
-    const dbResult = await persistentDailyGameManager.getDailyMatches();
-    console.log(`📊 Database matches: ${dbResult.matches.length}`);
-    
-    return res.json({
-      success: true,
-      data: {
-        contract: {
-          cycleId: currentCycleId.toString(),
-          cycleStatus: {
-            exists: exists,
-            endTime: endTime ? endTime.toString() : '0',
-            prizePool: prizePool ? prizePool.toString() : '0',
-            isResolved: isResolved,
-            slipCount: slipCount ? slipCount.toString() : '0'
-          },
-          matchesCount: contractMatches.length,
-          matches: contractMatches.map(match => ({
-            id: match.id.toString(),
-            startTime: match.startTime.toString(),
-            oddsHome: match.oddsHome.toString(),
-            oddsDraw: match.oddsDraw.toString(),
-            oddsAway: match.oddsAway.toString(),
-            oddsOver: match.oddsOver.toString(),
-            oddsUnder: match.oddsUnder.toString(),
-            result: {
-              moneyline: match.result.moneyline.toString(),
-              overUnder: match.result.overUnder.toString()
-            }
-          }))
-        },
-        database: {
-          matchesCount: dbResult.matches.length,
-          matches: dbResult.matches.slice(0, 3) // Show first 3 for debugging
-        },
-        timestamp: new Date().toISOString()
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error checking contract status:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message
+      error: 'Internal server error',
+      message: error.message
     });
   }
 }));
-
-// Contract validation endpoint for frontend
-router.get('/contract-validation', asyncHandler(async (req, res) => {
-  try {
-    console.log('🎯 Frontend requesting contract validation...');
-    
-    // Get matches directly from the contract
-    const Web3Service = require('../services/web3-service');
-    const web3Service = new Web3Service();
-    const contract = await web3Service.getOddysseyContract();
-    
-    // Get current cycle ID
-    const currentCycleId = await contract.dailyCycleId();
-    console.log(`📊 Contract cycle ID: ${currentCycleId}`);
-    
-    // Get matches directly from contract
-    let contractMatches = [];
-    try {
-      contractMatches = await contract.getDailyMatches(currentCycleId);
-      console.log(`📊 Retrieved ${contractMatches.length} matches from contract`);
-    } catch (error) {
-      console.error('❌ Error getting matches from contract:', error.message);
-      return res.json({
-        success: false,
-        validation: {
-          hasMatches: false,
-          matchCount: 0,
-          expectedCount: 10,
-          isValid: false,
-          contractMatches: [],
-          error: 'No active matches found in contract. Please wait for the next cycle.'
-        }
-      });
-    }
-    
-    const isValid = contractMatches.length === 10;
-    
-    // Transform contract matches to include match IDs for frontend validation
-    const transformedMatches = contractMatches.map((match, index) => ({
-      id: parseInt(match.id.toString()),
-      startTime: parseInt(match.startTime.toString()),
-      oddsHome: parseInt(match.oddsHome.toString()),
-      oddsDraw: parseInt(match.oddsDraw.toString()),
-      oddsAway: parseInt(match.oddsAway.toString()),
-      oddsOver: parseInt(match.oddsOver.toString()),
-      oddsUnder: parseInt(match.oddsUnder.toString()),
-      displayOrder: index + 1
-    }));
-    
-    return res.json({
-      success: true,
-      validation: {
-        hasMatches: contractMatches.length > 0,
-        matchCount: contractMatches.length,
-        expectedCount: 10,
-        isValid: isValid,
-        contractMatches: transformedMatches,
-        cycleId: currentCycleId.toString()
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error in contract-validation endpoint:', error);
-    return res.json({
-      success: false,
-      validation: {
-        hasMatches: false,
-        matchCount: 0,
-        expectedCount: 10,
-        isValid: false,
-        contractMatches: [],
-        error: 'Contract validation failed: ' + error.message
-      }
-    });
-  }
-}));
-
-// Frontend-compatible endpoint that mimics contract getDailyMatches
-router.get('/contract-matches', asyncHandler(async (req, res) => {
-  try {
-    console.log('🎯 Frontend requesting contract-compatible matches...');
-    
-    // Get matches directly from the contract, not the database
-    const Web3Service = require('../services/web3-service');
-    const web3Service = new Web3Service();
-    const contract = await web3Service.getOddysseyContract();
-    
-    // Get current cycle ID
-    const currentCycleId = await contract.dailyCycleId();
-    console.log(`📊 Getting matches from contract cycle: ${currentCycleId}`);
-    
-    // Get matches directly from contract
-    let contractMatches = [];
-    try {
-      contractMatches = await contract.getDailyMatches(currentCycleId);
-      console.log(`📊 Retrieved ${contractMatches.length} matches from contract`);
-    } catch (error) {
-      console.error('❌ Error getting matches from contract:', error.message);
-      return res.json({
-        success: false,
-        error: 'No active matches found in contract. Please wait for the next cycle.',
-        data: []
-      });
-    }
-    
-    if (contractMatches.length === 0) {
-      console.log('⚠️ No matches found in contract');
-      return res.json({
-        success: false,
-        error: 'No active matches found in contract. Please wait for the next cycle.',
-        data: []
-      });
-    }
-    
-    console.log(`✅ Returning ${contractMatches.length} matches from contract for frontend`);
-    
-    // Get match details from database to add team names and league info
-    const matchIds = contractMatches.map(m => m.id.toString());
-    let matchDetails = {};
-    
-    try {
-      const detailsResult = await db.query(`
-        SELECT id as fixture_id, home_team, away_team, league_name 
-        FROM oracle.fixtures 
-        WHERE id = ANY($1)
-      `, [matchIds]);
-      
-      detailsResult.rows.forEach(row => {
-        matchDetails[row.fixture_id] = {
-          homeTeam: row.home_team,
-          awayTeam: row.away_team,
-          leagueName: row.league_name
-        };
-      });
-    } catch (dbError) {
-      console.warn('⚠️ Could not fetch match details from database:', dbError.message);
-    }
-    
-    // Transform contract matches to frontend format
-    const transformedMatches = contractMatches.map((match, index) => ({
-      id: parseInt(match.id.toString()),
-      startTime: parseInt(match.startTime.toString()),
-      oddsHome: parseInt(match.oddsHome.toString()),
-      oddsDraw: parseInt(match.oddsDraw.toString()),
-      oddsAway: parseInt(match.oddsAway.toString()),
-      oddsOver: parseInt(match.oddsOver.toString()),
-      oddsUnder: parseInt(match.oddsUnder.toString()),
-      result: {
-        moneyline: parseInt(match.result.moneyline.toString()),
-        overUnder: parseInt(match.result.overUnder.toString())
-      },
-      // Additional frontend-friendly fields from database
-      homeTeam: matchDetails[match.id.toString()]?.homeTeam || `Team ${match.id}`,
-      awayTeam: matchDetails[match.id.toString()]?.awayTeam || `Team ${match.id}`,
-      leagueName: matchDetails[match.id.toString()]?.leagueName || 'Unknown League',
-      displayOrder: index + 1
-    }));
-    
-    return res.json({
-      success: true,
-      data: transformedMatches,
-      cycleId: currentCycleId.toString(),
-      totalMatches: transformedMatches.length,
-      source: 'contract' // Indicate this comes from contract, not database
-    });
-    
-  } catch (error) {
-    console.error('❌ Error in contract-matches endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to fetch contract matches',
-      data: []
-    });
-  }
-}));
-
-// Contract service validation endpoint (no redundant API calls)
-router.get('/contract-validation', asyncHandler(async (req, res) => {
-  try {
-    console.log('🔍 Contract service validation request...');
-    
-    // Get matches from database directly (no API call)
-    const result = await persistentDailyGameManager.getDailyMatches();
-    
-    if (!result.success || result.matches.length === 0) {
-      return res.json({
-        success: false,
-        error: 'No matches available for validation',
-        validation: {
-          hasMatches: false,
-          matchCount: 0,
-          expectedCount: 10,
-          isValid: false
-        }
-      });
-    }
-    
-    // Validate match count
-    const isValid = result.matches.length === 10;
-    
-    console.log(`✅ Contract validation: ${result.matches.length}/10 matches found`);
-    
-    // Transform matches to contract format for frontend ordering
-    const contractMatches = result.matches.map((match, index) => ({
-      id: parseInt(match.fixture_id),
-      startTime: Math.floor(new Date(match.match_date).getTime() / 1000),
-      oddsHome: Math.floor(parseFloat(match.home_odds) * 1000),
-      oddsDraw: Math.floor(parseFloat(match.draw_odds) * 1000),
-      oddsAway: Math.floor(parseFloat(match.away_odds) * 1000),
-      oddsOver: Math.floor(parseFloat(match.over_25_odds) * 1000),
-      oddsUnder: Math.floor(parseFloat(match.under_25_odds) * 1000),
-      result: {
-        moneyline: 0, // NotSet
-        overUnder: 0  // NotSet
-      },
-      // Additional frontend-friendly fields
-      homeTeam: match.home_team,
-      awayTeam: match.away_team,
-      leagueName: match.league_name,
-      displayOrder: index + 1
-    }));
-    
-    return res.json({
-      success: true,
-      validation: {
-        hasMatches: true,
-        matchCount: result.matches.length,
-        expectedCount: 10,
-        isValid: isValid,
-        cycleId: result.cycleId,
-        contractMatches: contractMatches // Include contract matches for frontend ordering
-      },
-      data: {
-        cycleId: result.cycleId,
-        totalMatches: result.matches.length
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error in contract validation endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to validate contract matches',
-      validation: {
-        hasMatches: false,
-        matchCount: 0,
-        expectedCount: 10,
-        isValid: false
-      }
-    });
-  }
-}));
-
-// Sync database matches to contract format (admin endpoint)
-router.post('/sync-to-contract', asyncHandler(async (req, res) => {
-  try {
-    console.log('🔄 Syncing database matches to contract format...');
-    
-    // Get current matches from database
-    const result = await persistentDailyGameManager.getDailyMatches();
-    
-    if (!result.success || result.matches.length === 0) {
-      return res.json({
-        success: false,
-        error: 'No matches found in database to sync'
-      });
-    }
-    
-    // Transform to contract format
-    const contractMatches = result.matches.map((match, index) => ({
-      id: parseInt(match.fixture_id),
-      startTime: Math.floor(new Date(match.match_date).getTime() / 1000),
-      oddsHome: Math.floor(parseFloat(match.home_odds) * 1000),
-      oddsDraw: Math.floor(parseFloat(match.draw_odds) * 1000),
-      oddsAway: Math.floor(parseFloat(match.away_odds) * 1000),
-      oddsOver: Math.floor(parseFloat(match.over_25_odds) * 1000),
-      oddsUnder: Math.floor(parseFloat(match.under_25_odds) * 1000),
-      result: {
-        moneyline: 0, // NotSet
-        overUnder: 0  // NotSet
-      }
-    }));
-    
-    console.log(`✅ Synced ${contractMatches.length} matches to contract format`);
-    
-    return res.json({
-      success: true,
-      data: {
-        matches: contractMatches,
-        totalMatches: contractMatches.length,
-        cycleId: result.cycleId,
-        message: 'Database matches synced to contract format successfully'
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error syncing to contract format:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-}));
-
-// Debug endpoint to test the matches query
-router.get('/debug-matches', async (req, res) => {
-  try {
-    console.log('🔍 Debugging matches query...');
-
-    const today = new Date().toISOString().split('T')[0];
-
-    // Test the exact query that's failing
-    const result = await db.query(`
-      SELECT 
-        f.id as id,
-        f.id as fixture_id,
-        f.home_team, f.away_team, f.match_date, f.league_name,
-        fo.value as odds_data
-      FROM oracle.fixtures f
-      LEFT JOIN oracle.fixture_odds fo ON f.id::VARCHAR = fo.fixture_id
-      WHERE DATE(f.match_date) = $1
-      AND f.league_name NOT ILIKE '%women%'
-      AND f.league_name NOT ILIKE '%female%'
-      AND f.league_name NOT ILIKE '%ladies%'
-      AND f.home_team NOT ILIKE '%women%'
-      AND f.away_team NOT ILIKE '%women%'
-      AND f.home_team NOT ILIKE '%female%'
-      AND f.away_team NOT ILIKE '%female%'
-      AND f.home_team NOT ILIKE '%ladies%'
-      AND f.away_team NOT ILIKE '%ladies%'
-      ORDER BY f.match_date ASC
-      LIMIT 10
-    `, [today]);
-
-    res.json({
-      success: true,
-      data: {
-        today_date: today,
-        query_result: result.rows,
-        row_count: result.rows.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Error in debug matches:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Debug matches failed',
-      error: error.message
-    });
-  }
-});
-
-// Health check endpoint for monitoring
-router.get('/health', asyncHandler(async (req, res) => {
-  try {
-    const healthCheck = {
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      service: 'oddyssey-api',
-      version: '1.0.0',
-      checks: {}
-    };
-
-    // Check database connectivity
-    try {
-      await db.query('SELECT 1');
-      healthCheck.checks.database = {
-        status: 'healthy',
-        message: 'Database connection successful'
-      };
-    } catch (dbError) {
-      healthCheck.status = 'unhealthy';
-      healthCheck.checks.database = {
-        status: 'unhealthy',
-        message: 'Database connection failed',
-        error: dbError.message
-      };
-    }
-
-    // Check if oddyssey schema exists
-    try {
-      const schemaCheck = await db.query(`
-        SELECT schema_name 
-        FROM information_schema.schemata 
-        WHERE schema_name = 'oddyssey'
-      `);
-
-      healthCheck.checks.oddyssey_schema = {
-        status: schemaCheck.rows.length > 0 ? 'healthy' : 'unhealthy',
-        message: schemaCheck.rows.length > 0 ? 'Oddyssey schema exists' : 'Oddyssey schema missing'
-      };
-
-      if (schemaCheck.rows.length === 0) {
-        healthCheck.status = 'unhealthy';
-      }
-    } catch (schemaError) {
-      healthCheck.status = 'unhealthy';
-      healthCheck.checks.oddyssey_schema = {
-        status: 'unhealthy',
-        message: 'Failed to check oddyssey schema',
-        error: schemaError.message
-      };
-    }
-
-    // Check if daily_game_matches table exists
-    try {
-      const tableCheck = await db.query(`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'oddyssey' 
-        AND table_name = 'daily_game_matches'
-      `);
-
-      healthCheck.checks.daily_game_matches_table = {
-        status: tableCheck.rows.length > 0 ? 'healthy' : 'unhealthy',
-        message: tableCheck.rows.length > 0 ? 'daily_game_matches table exists' : 'daily_game_matches table missing'
-      };
-
-      if (tableCheck.rows.length === 0) {
-        healthCheck.status = 'unhealthy';
-      }
-    } catch (tableError) {
-      healthCheck.status = 'unhealthy';
-      healthCheck.checks.daily_game_matches_table = {
-        status: 'unhealthy',
-        message: 'Failed to check daily_game_matches table',
-        error: tableError.message
-      };
-    }
-
-    // Check today's matches availability
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const matchesCheck = await db.query(`
-        SELECT COUNT(*) as count 
-        FROM oracle.daily_game_matches 
-        WHERE game_date = $1
-      `, [today]);
-
-      const matchCount = parseInt(matchesCheck.rows[0].count);
-      healthCheck.checks.todays_matches = {
-        status: matchCount === 10 ? 'healthy' : 'warning',
-        message: `Found ${matchCount} matches for today (expected: 10)`,
-        count: matchCount,
-        date: today
-      };
-
-      if (matchCount === 0) {
-        healthCheck.status = healthCheck.status === 'healthy' ? 'warning' : healthCheck.status;
-      }
-    } catch (matchesError) {
-      healthCheck.checks.todays_matches = {
-        status: 'unhealthy',
-        message: 'Failed to check today\'s matches',
-        error: matchesError.message
-      };
-    }
-
-    // Check persistent daily game manager service
-    try {
-      const serviceCheck = await persistentDailyGameManager.validateMatchCount();
-      healthCheck.checks.persistent_service = {
-        status: serviceCheck.isValid ? 'healthy' : 'warning',
-        message: serviceCheck.message,
-        details: {
-          date: serviceCheck.date,
-          count: serviceCheck.count,
-          expected: serviceCheck.expected
-        }
-      };
-    } catch (serviceError) {
-      healthCheck.checks.persistent_service = {
-        status: 'unhealthy',
-        message: 'Persistent Daily Game Manager service check failed',
-        error: serviceError.message
-      };
-    }
-
-    // Set overall status based on critical checks
-    const criticalChecks = ['database', 'oddyssey_schema', 'daily_game_matches_table'];
-    const hasCriticalFailure = criticalChecks.some(check =>
-      healthCheck.checks[check]?.status === 'unhealthy'
-    );
-
-    if (hasCriticalFailure && healthCheck.status === 'healthy') {
-      healthCheck.status = 'unhealthy';
-    }
-
-    // Return appropriate HTTP status
-    const httpStatus = healthCheck.status === 'healthy' ? 200 :
-      healthCheck.status === 'warning' ? 200 : 503;
-
-    res.status(httpStatus).json(healthCheck);
-  } catch (error) {
-    console.error('❌ Health check failed:', error);
-    res.status(503).json({
-      status: 'unhealthy',
-      timestamp: new Date().toISOString(),
-      service: 'oddyssey-api',
-      version: '1.0.0',
-      error: error.message,
-      checks: {}
-    });
-  }
-}));
-
-// Get Oddyssey matches for a specific date
-router.get('/matches/:date', validateDateParam('date', true, true), asyncHandler(async (req, res) => {
-  const { date } = req.params;
-
-  console.log(`🎯 Fetching Oddyssey matches for specific date: ${date}`);
-
-  // Use Persistent Daily Game Manager for consistent data access
-  const result = await persistentDailyGameManager.getDailyMatches(date);
-
-  if (result.success && result.matches.length > 0) {
-    // Transform data to match frontend expectations
-    const transformedMatches = result.matches.map(match => ({
-      id: match.fixture_id,
-      fixture_id: match.fixture_id,
-      home_team: match.home_team,
-      away_team: match.away_team,
-      match_date: match.match_date,
-      league_name: match.league_name,
-      display_order: match.display_order,
-      odds: {
-        home: parseFloat(match.home_odds) || 0,
-        draw: parseFloat(match.draw_odds) || 0,
-        away: parseFloat(match.away_odds) || 0,
-        over_25: parseFloat(match.over_25_odds) || 0,
-        under_25: parseFloat(match.under_25_odds) || 0
-      },
-      cycle_id: match.cycle_id
-    }));
-
-    res.json(createSuccessResponse(
-      {
-        date: date,
-        matches: transformedMatches,
-        count: transformedMatches.length
-      },
-      {
-        total_matches: transformedMatches.length,
-        expected_matches: 10,
-        cycle_id: result.cycleId,
-        source: 'persistent_storage',
-        operation: 'get_matches_by_date'
-      }
-    ));
-  } else {
-    res.json(createSuccessResponse(
-      {
-        date: date,
-        matches: [],
-        count: 0
-      },
-      {
-        total_matches: 0,
-        expected_matches: 10,
-        cycle_id: null,
-        source: 'persistent_storage',
-        operation: 'get_matches_by_date'
-      },
-      result.message || 'No matches found for this date'
-    ));
-  }
-}));
-
-// Trigger Oddyssey match selection (admin endpoint) - 1-day strategy
-router.post('/select-matches', async (req, res) => {
-  try {
-    console.log('🎯 Triggering Oddyssey match selection (1-day strategy)...');
-
-    // Select matches for today only using 1-day strategy
-    const selections = await oddysseyMatchSelector.selectDailyMatches();
-
-    // Save selections to database
-    await oddysseyMatchSelector.saveOddysseyMatches(selections);
-
-    res.json({
-      success: true,
-      message: 'Oddyssey matches selected successfully (1-day strategy)',
-      data: {
-        today: {
-          date: selections.today.date,
-          count: selections.today.matches.length
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('Error selecting Oddyssey matches:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Trigger Oddyssey match selection (admin endpoint) - Original difficulty-based strategy
-router.post('/select-matches-difficulty', async (req, res) => {
-  try {
-    console.log('🎯 Triggering Oddyssey match selection (difficulty-based strategy)...');
-
-    // Select matches using original difficulty-based strategy
-    const result = await oddysseyMatchSelector.selectDailyMatches();
-
-    res.json({
-      success: true,
-      message: 'Oddyssey matches selected successfully (difficulty-based strategy)',
-      data: {
-        selectedMatches: result.selectedMatches.length,
-        summary: result.summary
-      }
-    });
-
-  } catch (error) {
-    console.error('Error selecting Oddyssey matches:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Get Oddyssey statistics (global or user-specific)
-router.get('/stats', async (req, res) => {
-  try {
-    const { type, address } = req.query;
-
-    if (type === 'user' && !address) {
-      return res.status(400).json({
-        success: false,
-        message: 'User address required for user stats'
-      });
-    }
-
-    if (type === 'user') {
-      // Get user's overall statistics
-      const userStats = await getUserStats(address);
-      return res.json({
-        success: true,
-        data: userStats
-      });
-    } else {
-      // Get global statistics
-      const globalStats = await getGlobalStats();
-      return res.json({
-        success: true,
-        data: globalStats
-      });
-    }
-
-  } catch (error) {
-    console.error('Error fetching Oddyssey stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
 
 // Get current cycle information
-router.get('/current-cycle', async (req, res) => {
+router.get('/current-cycle', cacheMiddleware(30000), async (req, res) => {
   try {
     const currentCycle = await db.query(`
-      SELECT * FROM oracle.current_oddyssey_cycle
+      SELECT 
+        cycle_id,
+        cycle_start_time,
+        cycle_end_time,
+        matches_data,
+        is_resolved,
+        created_at
+      FROM oracle.current_oddyssey_cycle 
+      LIMIT 1
     `);
 
     if (currentCycle.rows.length === 0) {
-      return res.json({
-        success: true,
-        data: null,
-        message: 'No active cycle found'
+      return res.status(404).json({
+        success: false,
+        error: 'No current cycle found'
       });
     }
 
-    res.json({
-      success: true,
-      data: currentCycle.rows[0]
+    const cycleData = currentCycle.rows[0];
+
+    let transformedMatchesData = cycleData.matches_data;
+    if (Array.isArray(cycleData.matches_data) && cycleData.matches_data.length > 0) {
+      // If matches_data is array of strings (fixture IDs), fetch match details
+      if (typeof cycleData.matches_data[0] === 'string') {
+        const fixtureIds = cycleData.matches_data;
+        const matchesQuery = `
+          SELECT 
+            f.id,
+            f.home_team,
+            f.away_team,
+            f.league_name,
+            f.match_date,
+            f.status
+          FROM oracle.fixtures f
+          WHERE f.id = ANY($1)
+          ORDER BY f.match_date ASC
+        `;
+        
+        const matchesResult = await db.query(matchesQuery, [fixtureIds]);
+        transformedMatchesData = matchesResult.rows.map((match, index) => transformMatchData(match, index));
+      } else {
+        // If matches_data is already array of objects, just transform to consistent format
+        transformedMatchesData = cycleData.matches_data.map((match, index) => transformMatchData(match, index));
+      }
+    }
+
+    // Use BigInt serializer to safely convert any remaining BigInt values
+    const safeData = serializeBigInts({
+      ...cycleData,
+      matches_data: transformedMatchesData
     });
 
+    // Add cache control headers to prevent hydration mismatches
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    const response = createStandardResponse(safeData);
+    res.json(response);
+
   } catch (error) {
-    console.error('Error fetching current cycle:', error);
+    console.error('❌ Error in /current-cycle endpoint:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      error: 'Internal server error',
+      message: error.message
     });
   }
 });
+
+// Add missing live-matches endpoint
+router.post('/live-matches', cacheMiddleware(15000), asyncHandler(async (req, res) => {
+  try {
+    // This endpoint should return live match data
+    // For now, return current cycle matches as live matches
+    const currentDate = new Date().toISOString().split('T')[0];
+    
+    const liveMatchesQuery = `
+      SELECT 
+        fixture_id as id,
+        home_team,
+        away_team,
+        league_name,
+        match_date,
+        home_odds,
+        draw_odds,
+        away_odds,
+        over_25_odds,
+        under_25_odds,
+        display_order
+      FROM oracle.daily_game_matches
+      WHERE game_date = $1
+      ORDER BY display_order ASC
+    `;
+    
+    const result = await db.query(liveMatchesQuery, [currentDate]);
+    const liveMatches = result.rows.map((match, index) => transformMatchData(match, index));
+
+    const response = createStandardResponse(liveMatches, {
+      count: liveMatches.length,
+      date: currentDate,
+      source: "live_matches"
+    });
+
+    res.json(serializeBigInts(response));
+  } catch (error) {
+    console.error('❌ Error in /live-matches endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+}));
+
+// Add leaderboard endpoint (placeholder)
+router.get('/leaderboard', cacheMiddleware(60000), asyncHandler(async (req, res) => {
+  try {
+    // Placeholder for leaderboard data
+    const response = createStandardResponse([], {
+      count: 0,
+      source: "leaderboard"
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('❌ Error in /leaderboard endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+}));
+
+// GET /api/oddyssey/stats - Get cycle statistics
+router.get('/stats', cacheMiddleware(60000), asyncHandler(async (req, res) => {
+  try {
+    const { cycleId } = req.query;
+    
+    // If no cycle ID provided, use current cycle
+    let targetCycleId = cycleId;
+    if (!targetCycleId) {
+      const currentCycleQuery = `
+        SELECT cycle_id 
+        FROM oracle.oddyssey_cycles 
+        WHERE is_resolved = false 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+      const currentCycleResult = await db.query(currentCycleQuery);
+      targetCycleId = currentCycleResult.rows[0]?.cycle_id;
+    }
+    
+    if (!targetCycleId) {
+      return res.json({
+        success: true,
+        data: {
+          cycleId: null,
+          participants: 0,
+          totalSlips: 0,
+          prizePool: '0',
+          avgCorrectPredictions: 0,
+          maxCorrectPredictions: 0,
+          isResolved: false
+        },
+        meta: {
+          source: 'stats',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // Get cycle statistics
+    const statsQuery = `
+      SELECT 
+        oc.cycle_id,
+        oc.prize_pool,
+        oc.matches_count,
+        oc.is_resolved,
+        oc.resolved_at,
+        COUNT(DISTINCT os.player_address) as participants,
+        COUNT(os.slip_id) as total_slips,
+        COALESCE(AVG(os.correct_count), 0) as avg_correct_predictions,
+        COALESCE(MAX(os.correct_count), 0) as max_correct_predictions
+      FROM oracle.oddyssey_cycles oc
+      LEFT JOIN oracle.oddyssey_slips os ON oc.cycle_id = os.cycle_id
+      WHERE oc.cycle_id = $1
+      GROUP BY oc.cycle_id, oc.prize_pool, oc.matches_count, oc.is_resolved, oc.resolved_at
+    `;
+    
+    const result = await db.query(statsQuery, [targetCycleId]);
+    const stats = result.rows[0];
+    
+    if (!stats) {
+      return res.status(404).json({
+        success: false,
+        error: 'Cycle not found',
+        message: `Cycle ${targetCycleId} does not exist`
+      });
+    }
+
+    // Transform the data to match frontend expectations
+    const transformedStats = {
+      cycleId: stats.cycle_id,
+      participants: parseInt(stats.participants) || 0,
+      totalSlips: parseInt(stats.total_slips) || 0,
+      prizePool: stats.prize_pool || '0',
+      avgCorrectPredictions: parseFloat(stats.avg_correct_predictions) || 0,
+      maxCorrectPredictions: parseInt(stats.max_correct_predictions) || 0,
+      isResolved: stats.is_resolved || false,
+      resolvedAt: stats.resolved_at,
+      matchesCount: stats.matches_count || 0
+    };
+
+    res.json({
+      success: true,
+      data: transformedStats,
+      meta: {
+        source: 'stats',
+        timestamp: new Date().toISOString(),
+        cycleId: targetCycleId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /stats endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+}));
 
 // Place a new slip (submit predictions) with strict contract validation
 router.post('/place-slip', rateLimitMiddleware((req) => `place-slip:${req.body.playerAddress}`, 3, 60), async (req, res) => {
@@ -1393,186 +655,6 @@ router.post('/place-slip', rateLimitMiddleware((req) => `place-slip:${req.body.p
   }
 });
 
-// Evaluate a slip with contract integration
-router.post('/evaluate-slip', async (req, res) => {
-  try {
-    const { slipId } = req.body;
-
-    if (!slipId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Slip ID is required'
-      });
-    }
-
-    // Get slip from database
-    const slipResult = await db.query(`
-      SELECT * FROM oracle.oddyssey_slips WHERE slip_id = $1
-    `, [slipId]);
-
-    if (slipResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Slip not found'
-      });
-    }
-
-    const slip = slipResult.rows[0];
-
-    if (slip.is_evaluated) {
-      return res.status(400).json({
-        success: false,
-        message: 'Slip has already been evaluated'
-      });
-    }
-
-    // Check if cycle is resolved on contract
-    const Web3Service = require('../services/web3-service');
-    const web3Service = new Web3Service();
-    
-    let cycleStatus;
-    try {
-      cycleStatus = await web3Service.getCycleStatus(slip.cycle_id);
-      if (!cycleStatus.exists || Number(cycleStatus.state) !== 3) { // 3 = Resolved
-        return res.status(400).json({
-          success: false,
-          message: 'Cycle is not resolved yet'
-        });
-      }
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: `Failed to check cycle status: ${error.message}`
-      });
-    }
-
-    // Evaluate slip on contract
-    let tx;
-    try {
-      tx = await web3Service.evaluateSlip(slipId);
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: `Contract evaluation failed: ${error.message}`
-      });
-    }
-
-    // Update database with evaluation results
-    await db.query(`
-      UPDATE oracle.oddyssey_slips 
-      SET is_evaluated = TRUE, 
-          tx_hash = $1
-      WHERE slip_id = $2
-    `, [tx.hash, slipId]);
-
-    console.log(`✅ Slip ${slipId} evaluated on contract with tx: ${tx.hash}`);
-
-    res.json({
-      success: true,
-      message: 'Slip evaluated successfully',
-      data: {
-        slipId: slipId,
-        txHash: tx.hash
-      }
-    });
-
-  } catch (error) {
-    console.error('Error evaluating slip:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Get user's slips
-router.get('/slips/:playerAddress', async (req, res) => {
-  try {
-    const { playerAddress } = req.params;
-    const { limit = 10 } = req.query;
-
-    const slips = await db.query(`
-      SELECT 
-        s.slip_id,
-        s.cycle_id,
-        s.player_address,
-        s.creator_address,
-        s.pool_id,
-        s.transaction_hash,
-        s.category,
-        s.uses_bitr,
-        s.creator_stake,
-        s.odds,
-        s.notification_type,
-        s.message,
-        s.is_read,
-        s.placed_at as created_at,
-        s.predictions,
-        s.final_score,
-        s.correct_count,
-        s.is_evaluated,
-        s.leaderboard_rank,
-        s.prize_claimed,
-        s.tx_hash,
-        c.is_resolved as cycle_resolved,
-        c.prize_pool,
-        c.resolved_at,
-        c.cycle_start_time,
-        c.cycle_end_time
-      FROM oracle.oddyssey_slips s
-      LEFT JOIN oracle.oddyssey_cycles c ON s.cycle_id = c.cycle_id
-      WHERE s.player_address = $1
-      ORDER BY s.placed_at DESC
-      LIMIT $2
-    `, [playerAddress, limit]);
-
-    res.json({
-      success: true,
-      data: slips.rows
-    });
-
-  } catch (error) {
-    console.error('Error fetching user slips:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Get leaderboard for a specific cycle
-router.get('/leaderboard/:cycleId', async (req, res) => {
-  try {
-    const { cycleId } = req.params;
-
-    const leaderboard = await db.query(`
-      SELECT 
-        s.player_address,
-        s.final_score,
-        s.correct_count,
-        s.leaderboard_rank,
-        s.prize_claimed,
-        ROW_NUMBER() OVER (ORDER BY s.final_score DESC, s.correct_count DESC) as rank
-      FROM oracle.oddyssey_slips s
-      WHERE s.cycle_id = $1 AND s.is_evaluated = TRUE
-      ORDER BY s.final_score DESC, s.correct_count DESC
-      LIMIT 10
-    `, [cycleId]);
-
-    res.json({
-      success: true,
-      data: leaderboard.rows
-    });
-
-  } catch (error) {
-    console.error('Error fetching leaderboard:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
 // Get user's slips for a specific cycle
 router.get('/user-slips/:cycleId/:address', async (req, res) => {
   try {
@@ -1614,7 +696,13 @@ router.get('/user-slips/:cycleId/:address', async (req, res) => {
 
     res.json({
       success: true,
-      data: userSlips.rows
+      data: userSlips.rows,
+      meta: {
+        count: userSlips.rows.length,
+        cycleId: cycleId,
+        address: address,
+        timestamp: new Date().toISOString()
+      }
     });
 
   } catch (error) {
@@ -1630,8 +718,209 @@ router.get('/user-slips/:cycleId/:address', async (req, res) => {
 router.get('/user-slips/:address', async (req, res) => {
   try {
     const { address } = req.params;
+    const { startDate, endDate, limit = '50' } = req.query;
 
-    const userSlips = await db.query(`
+    let query = `
+      SELECT 
+        s.slip_id,
+        s.cycle_id,
+        s.player_address,
+        s.creator_address,
+        s.pool_id,
+        s.transaction_hash,
+        s.category,
+        s.uses_bitr,
+        s.creator_stake,
+        s.odds,
+        s.notification_type,
+        s.message,
+        s.is_read,
+        s.placed_at as created_at,
+        s.predictions,
+        s.final_score,
+        s.correct_count,
+        s.is_evaluated,
+        s.leaderboard_rank,
+        s.prize_claimed,
+        s.tx_hash,
+        c.is_resolved as cycle_resolved,
+        c.prize_pool,
+        c.resolved_at,
+        c.cycle_start_time,
+        c.cycle_end_time
+      FROM oracle.oddyssey_slips s
+      LEFT JOIN oracle.oddyssey_cycles c ON s.cycle_id = c.cycle_id
+      WHERE s.player_address = $1
+    `;
+
+    const queryParams = [address];
+    let paramIndex = 2;
+
+    // Add date filtering if provided
+    if (startDate) {
+      query += ` AND DATE(s.placed_at) >= $${paramIndex}`;
+      queryParams.push(startDate);
+      paramIndex++;
+    }
+
+    if (endDate) {
+      query += ` AND DATE(s.placed_at) <= $${paramIndex}`;
+      queryParams.push(endDate);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY s.placed_at DESC LIMIT $${paramIndex}`;
+    queryParams.push(parseInt(limit));
+
+    const userSlips = await db.query(query, queryParams);
+
+    // Enrich predictions with team names and proper formatting
+    const enrichedSlips = await Promise.all(userSlips.rows.map(async (slip) => {
+      if (!slip.predictions || !Array.isArray(slip.predictions)) {
+        return slip;
+      }
+
+      const enrichedPredictions = await Promise.all(slip.predictions.map(async (pred) => {
+        try {
+          // Handle contract format (array) vs enriched format (object)
+          let matchId, betType, selection, odds;
+          
+          if (Array.isArray(pred)) {
+            // Contract format: [matchId, betType, selectionHash, odds]
+            matchId = pred[0];
+            betType = pred[1];
+            selection = pred[2];
+            odds = pred[3];
+          } else if (pred && typeof pred === 'object') {
+            // Enriched format: { matchId, selectedOdd, etc. }
+            matchId = pred.matchId || pred.match_id || pred.id;
+            odds = pred.selectedOdd || pred.odds;
+          } else {
+            console.warn('Unknown prediction format:', pred);
+            return null;
+          }
+
+          // Get fixture details for team names
+          const fixtureResult = await db.query(`
+            SELECT id, home_team, away_team, league_name, starting_at
+            FROM oracle.fixtures 
+            WHERE id = $1
+          `, [matchId]);
+
+          const fixture = fixtureResult.rows[0];
+          
+          if (fixture) {
+            // Calculate proper decimal odds (divide by 1000 since contract uses ODDS_SCALING_FACTOR = 1000)
+            const decimalOdds = parseFloat(odds) / 1000;
+            
+            // Format match time
+            const matchTime = fixture.starting_at ? 
+              new Date(fixture.starting_at).toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }) : '00:00';
+
+            // Determine prediction type based on betType or selection
+            let prediction;
+            if (betType === '0' || betType === 0) {
+              prediction = '1'; // Home win
+            } else if (betType === '1' || betType === 1) {
+              prediction = 'X'; // Draw
+            } else if (betType === '2' || betType === 2) {
+              prediction = '2'; // Away win
+            } else {
+              // Try to determine from selection hash or other fields
+              prediction = pred.prediction || pred.selection || '1';
+            }
+
+            return {
+              matchId: matchId,
+              match_id: matchId,
+              prediction: prediction,
+              selectedOdd: odds,
+              home_team: fixture.home_team,
+              away_team: fixture.away_team,
+              league_name: fixture.league_name,
+              match_time: matchTime,
+              odds: decimalOdds,
+              starting_at: fixture.starting_at
+            };
+          }
+          
+          // Fallback for missing fixture data
+          return {
+            matchId: matchId,
+            match_id: matchId,
+            prediction: '1',
+            selectedOdd: odds,
+            home_team: `Team ${matchId}`,
+            away_team: `Team ${matchId}`,
+            league_name: 'Unknown League',
+            match_time: '00:00',
+            odds: parseFloat(odds) / 1000
+          };
+        } catch (error) {
+          console.error(`Error enriching prediction for match ${pred[0] || pred.matchId}:`, error);
+          const matchId = pred[0] || pred.matchId || 'unknown';
+          const odds = pred[3] || pred.selectedOdd || 1;
+          return {
+            matchId: matchId,
+            match_id: matchId,
+            prediction: '1',
+            selectedOdd: odds,
+            home_team: `Team ${matchId}`,
+            away_team: `Team ${matchId}`,
+            league_name: 'Unknown League',
+            match_time: '00:00',
+            odds: parseFloat(odds) / 1000
+          };
+        }
+      }));
+
+      // Calculate proper total odds (limit to reasonable values)
+      const totalOdds = enrichedPredictions.reduce((acc, pred) => {
+        const odds = pred.odds || 1;
+        const newAcc = acc * odds;
+        // Prevent extremely large numbers that cause display issues
+        return newAcc > 1e6 ? 1e6 : newAcc;
+      }, 1);
+
+      return {
+        ...slip,
+        predictions: enrichedPredictions,
+        total_odds: totalOdds,
+        submitted_time: slip.created_at ? new Date(slip.created_at).toLocaleString() : 'Unknown',
+        status: slip.is_evaluated ? 'Evaluated' : 'Pending'
+      };
+    }));
+
+    res.json({
+      success: true,
+      data: enrichedSlips,
+      meta: {
+        count: enrichedSlips.length,
+        address: address,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching user slips:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Get user's basic slips (legacy endpoint for compatibility)
+router.get('/slips/:playerAddress', async (req, res) => {
+  try {
+    const { playerAddress } = req.params;
+    const { limit = 10 } = req.query;
+
+    const slips = await db.query(`
       SELECT 
         s.slip_id,
         s.cycle_id,
@@ -1663,334 +952,172 @@ router.get('/user-slips/:address', async (req, res) => {
       LEFT JOIN oracle.oddyssey_cycles c ON s.cycle_id = c.cycle_id
       WHERE s.player_address = $1
       ORDER BY s.placed_at DESC
-    `, [address]);
+      LIMIT $2
+    `, [playerAddress, limit]);
 
-    res.json({
-      success: true,
-      data: userSlips.rows,
-      meta: {
-        count: userSlips.rows.length,
-        address: address,
-        timestamp: new Date().toISOString()
+    // Enrich predictions with team names and proper formatting
+    const enrichedSlips = await Promise.all(slips.rows.map(async (slip) => {
+      if (!slip.predictions || !Array.isArray(slip.predictions)) {
+        return slip;
       }
-    });
 
-  } catch (error) {
-    console.error('Error fetching all user slips:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
+      const enrichedPredictions = await Promise.all(slip.predictions.map(async (pred) => {
+        try {
+          // Handle contract format (array) vs enriched format (object)
+          let matchId, betType, selection, odds;
+          
+          if (Array.isArray(pred)) {
+            // Contract format: [matchId, betType, selectionHash, odds]
+            matchId = pred[0];
+            betType = pred[1];
+            selection = pred[2];
+            odds = pred[3];
+          } else if (pred && typeof pred === 'object') {
+            // Enriched format: { matchId, selectedOdd, etc. }
+            matchId = pred.matchId || pred.match_id || pred.id;
+            odds = pred.selectedOdd || pred.odds;
+          } else {
+            console.warn('Unknown prediction format:', pred);
+            return null;
+          }
 
-// Get user preferences
-router.get('/preferences/:address', async (req, res) => {
-  try {
-    const { address } = req.params;
+          // Get fixture details for team names
+          const fixtureResult = await db.query(`
+            SELECT id, home_team, away_team, league_name, starting_at
+            FROM oracle.fixtures 
+            WHERE id = $1
+          `, [matchId]);
 
-    const result = await db.query(`
-      SELECT * FROM oracle.oddyssey_user_preferences 
-      WHERE user_address = $1
-    `, [address]);
+          const fixture = fixtureResult.rows[0];
+          
+          if (fixture) {
+            // Calculate proper decimal odds (divide by 1000 since contract uses ODDS_SCALING_FACTOR = 1000)
+            const decimalOdds = parseFloat(odds) / 1000;
+            
+            // Format match time
+            const matchTime = fixture.starting_at ? 
+              new Date(fixture.starting_at).toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }) : '00:00';
 
-    if (result.rows.length === 0) {
-      // Return default preferences
-      return res.json({
-        success: true,
-        data: {
-          user_address: address,
-          auto_evaluate: false,
-          auto_claim: false,
-          notifications: true
+            // Determine prediction type based on betType or selection
+            let prediction;
+            if (betType === '0' || betType === 0) {
+              prediction = '1'; // Home win
+            } else if (betType === '1' || betType === 1) {
+              prediction = 'X'; // Draw
+            } else if (betType === '2' || betType === 2) {
+              prediction = '2'; // Away win
+            } else {
+              // Try to determine from selection hash or other fields
+              prediction = pred.prediction || pred.selection || '1';
+            }
+
+            return {
+              matchId: matchId,
+              match_id: matchId,
+              prediction: prediction,
+              selectedOdd: odds,
+              home_team: fixture.home_team,
+              away_team: fixture.away_team,
+              league_name: fixture.league_name,
+              match_time: matchTime,
+              odds: decimalOdds,
+              starting_at: fixture.starting_at
+            };
+          }
+          
+          // Fallback for missing fixture data
+          return {
+            matchId: matchId,
+            match_id: matchId,
+            prediction: '1',
+            selectedOdd: odds,
+            home_team: `Team ${matchId}`,
+            away_team: `Team ${matchId}`,
+            league_name: 'Unknown League',
+            match_time: '00:00',
+            odds: parseFloat(odds) / 1000
+          };
+        } catch (error) {
+          console.error(`Error enriching prediction for match ${pred[0] || pred.matchId}:`, error);
+          const matchId = pred[0] || pred.matchId || 'unknown';
+          const odds = pred[3] || pred.selectedOdd || 1;
+          return {
+            matchId: matchId,
+            match_id: matchId,
+            prediction: '1',
+            selectedOdd: odds,
+            home_team: `Team ${matchId}`,
+            away_team: `Team ${matchId}`,
+            league_name: 'Unknown League',
+            match_time: '00:00',
+            odds: parseFloat(odds) / 1000
+          };
         }
-      });
-    }
-
-    res.json({
-      success: true,
-      data: result.rows[0]
-    });
-
-  } catch (error) {
-    console.error('Error fetching user preferences:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Update user preferences
-router.put('/preferences/:address', async (req, res) => {
-  try {
-    const { address } = req.params;
-    const { auto_evaluate, auto_claim, notifications } = req.body;
-
-    const result = await db.query(`
-      INSERT INTO oracle.oddyssey_user_preferences (
-        user_address, auto_evaluate, auto_claim, notifications, updated_at
-      ) VALUES ($1, $2, $3, $4, NOW())
-      ON CONFLICT (user_address) DO UPDATE SET
-        auto_evaluate = EXCLUDED.auto_evaluate,
-        auto_claim = EXCLUDED.auto_claim,
-        notifications = EXCLUDED.notifications,
-        updated_at = NOW()
-    `, [address, auto_evaluate, auto_claim, notifications]);
-
-    res.json({
-      success: true,
-      message: 'Preferences updated successfully'
-    });
-
-  } catch (error) {
-    console.error('Error updating user preferences:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
-
-
-
-// Helper function to get user statistics
-async function getUserStats(address) {
-  try {
-    // Get user's overall statistics
-    const userStats = await db.query(`
-      SELECT 
-        COUNT(*) as total_slips,
-        COUNT(CASE WHEN correct_count >= 5 THEN 1 END) as total_wins,
-        COALESCE(MAX(final_score), 0) as best_score,
-        COALESCE(AVG(final_score), 0) as average_score,
-        COALESCE(SUM(CASE WHEN correct_count >= 5 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 0) as win_rate
-      FROM oracle.oddyssey_slips
-      WHERE player_address = $1 AND is_evaluated = TRUE
-    `, [address]);
-
-    // Get user's current streak
-    const streakQuery = await db.query(`
-      WITH user_cycles AS (
-        SELECT 
-          cycle_id,
-          correct_count,
-          ROW_NUMBER() OVER (ORDER BY cycle_id DESC) as rn
-        FROM oracle.oddyssey_slips
-        WHERE player_address = $1 AND is_evaluated = TRUE
-        ORDER BY cycle_id DESC
-      ),
-      streak_calc AS (
-        SELECT 
-          cycle_id,
-          correct_count,
-          rn,
-          CASE 
-            WHEN correct_count >= 5 THEN 1
-            ELSE 0
-          END as is_win,
-          SUM(CASE 
-            WHEN correct_count >= 5 THEN 1
-            ELSE 0
-          END) OVER (ORDER BY rn) as running_wins
-        FROM user_cycles
-      )
-      SELECT 
-        COUNT(*) as current_streak
-      FROM streak_calc
-      WHERE is_win = 1 AND running_wins = (
-        SELECT MAX(running_wins) FROM streak_calc WHERE is_win = 1
-      )
-    `, [address]);
-
-    // Get user's best streak
-    const bestStreakQuery = await db.query(`
-      WITH user_results AS (
-        SELECT 
-          cycle_id,
-          CASE WHEN correct_count >= 5 THEN 1 ELSE 0 END as is_win
-        FROM oracle.oddyssey_slips
-        WHERE player_address = $1 AND is_evaluated = TRUE
-        ORDER BY cycle_id
-      ),
-      streak_groups AS (
-        SELECT 
-          cycle_id,
-          is_win,
-          SUM(CASE WHEN is_win = 0 THEN 1 ELSE 0 END) OVER (ORDER BY cycle_id) as streak_group
-        FROM user_results
-      )
-      SELECT 
-        COALESCE(MAX(streak_length), 0) as best_streak
-      FROM (
-        SELECT 
-          streak_group,
-          COUNT(*) as streak_length
-        FROM streak_groups
-        WHERE is_win = 1
-        GROUP BY streak_group
-      ) streaks
-    `, [address]);
-
-    const stats = userStats.rows[0];
-    const currentStreak = streakQuery.rows[0]?.current_streak || 0;
-    const bestStreak = bestStreakQuery.rows[0]?.best_streak || 0;
-
-    return {
-      totalSlips: parseInt(stats.total_slips || 0),
-      totalWins: parseInt(stats.total_wins || 0),
-      bestScore: parseFloat(stats.best_score || 0),
-      averageScore: parseFloat(stats.average_score || 0),
-      winRate: parseFloat(stats.win_rate || 0),
-      currentStreak: parseInt(currentStreak),
-      bestStreak: parseInt(bestStreak)
-    };
-
-  } catch (error) {
-    console.error('Error getting user stats:', error);
-    return {
-      totalSlips: 0,
-      totalWins: 0,
-      bestScore: 0,
-      averageScore: 0,
-      winRate: 0,
-      currentStreak: 0,
-      bestStreak: 0
-    };
-  }
-}
-
-// Helper function to get global statistics
-async function getGlobalStats() {
-  try {
-    // Get global statistics from oddyssey_slips table
-    const globalStats = await db.query(`
-      SELECT 
-        COUNT(*) as total_slips,
-        COUNT(DISTINCT player_address) as active_users,
-        COALESCE(AVG(final_score), 0) as average_score,
-        COALESCE(MAX(final_score), 0) as highest_score,
-        COUNT(CASE WHEN correct_count >= 5 THEN 1 END) as total_wins
-      FROM oracle.oddyssey_slips
-      WHERE is_evaluated = TRUE
-    `);
-
-    // Get statistics from oddyssey indexer data
-    const indexerStats = await db.query(`
-      SELECT 
-        COUNT(DISTINCT user_address) as total_players_indexed,
-        COUNT(*) as total_slips_indexed,
-        COALESCE(AVG(best_score), 0) as avg_best_score,
-        COALESCE(AVG(win_rate::float / 100), 0) as avg_win_rate
-      FROM oracle.oddyssey_user_stats
-    `);
-
-    // Get cycle statistics
-    const cycleStats = await db.query(`
-      SELECT 
-        COUNT(*) as total_cycles,
-        COUNT(CASE WHEN is_resolved = TRUE THEN 1 END) as completed_cycles,
-        COUNT(CASE WHEN is_resolved = FALSE THEN 1 END) as active_cycles,
-        5.2 as avg_prize_pool
-      FROM oracle.oddyssey_cycles
-    `);
-
-    // Get current cycle's leaderboard
-    const currentCycle = await db.query(`
-      SELECT MAX(cycle_id) as current_cycle_id FROM oracle.oddyssey_cycles
-    `);
-
-    let leaderboard = [];
-    if (currentCycle.rows[0]?.current_cycle_id) {
-      const leaderboardQuery = await db.query(`
-        SELECT 
-          s.player_address,
-          s.final_score,
-          s.correct_count,
-          s.leaderboard_rank,
-          s.prize_claimed,
-          ROW_NUMBER() OVER (ORDER BY s.final_score DESC, s.correct_count DESC) as rank
-        FROM oracle.oddyssey_slips s
-        WHERE s.cycle_id = $1 AND s.is_evaluated = TRUE
-        ORDER BY s.final_score DESC, s.correct_count DESC
-        LIMIT 5
-      `, [currentCycle.rows[0].current_cycle_id]);
-
-      leaderboard = leaderboardQuery.rows.map(row => ({
-        rank: row.rank,
-        player: row.player_address,
-        score: parseFloat(row.final_score || 0),
-        correctCount: parseInt(row.correct_count || 0),
-        prize: calculatePrize(row.rank, 5000) // Mock prize pool
       }));
-    }
 
-    const stats = globalStats.rows[0];
-    const indexer = indexerStats.rows[0];
-    const cycles = cycleStats.rows[0];
+      // Calculate proper total odds (limit to reasonable values)
+      const totalOdds = enrichedPredictions.reduce((acc, pred) => {
+        const odds = pred.odds || 1;
+        const newAcc = acc * odds;
+        // Prevent extremely large numbers that cause display issues
+        return newAcc > 1e6 ? 1e6 : newAcc;
+      }, 1);
 
-    return {
-      totalPlayers: Math.max(
-        parseInt(stats.active_users || 0),
-        parseInt(indexer.total_players_indexed || 0)
-      ),
-      totalSlips: Math.max(
-        parseInt(stats.total_slips || 0),
-        parseInt(indexer.total_slips_indexed || 0)
-      ),
-      totalCycles: parseInt(cycles.total_cycles || 0),
-      activeCycles: parseInt(cycles.active_cycles || 0),
-      completedCycles: parseInt(cycles.completed_cycles || 0),
-      avgPrizePool: parseFloat(cycles.avg_prize_pool || 5.2),
-      winRate: (parseFloat(indexer.avg_win_rate || 0) * 100) || 23.4,
-      avgCorrect: parseFloat(indexer.avg_best_score || 0) / 100 || 8.7,
-      averageScore: parseFloat(stats.average_score || 0),
-      highestScore: parseFloat(stats.highest_score || 0),
-      totalWins: parseInt(stats.total_wins || 0),
-      leaderboard: leaderboard
-    };
+      return {
+        ...slip,
+        predictions: enrichedPredictions,
+        total_odds: totalOdds,
+        submitted_time: slip.created_at ? new Date(slip.created_at).toLocaleString() : 'Unknown',
+        status: slip.is_evaluated ? 'Evaluated' : 'Pending'
+      };
+    }));
+
+    res.json({
+      success: true,
+      data: enrichedSlips
+    });
 
   } catch (error) {
-    console.error('Error getting global stats:', error);
-    return {
-      totalVolume: 0,
-      totalSlips: 0,
-      activeUsers: 0,
-      averageScore: 0,
-      highestScore: 0,
-      totalPrizePool: 0,
-      leaderboard: []
-    };
+    console.error('Error fetching user slips:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
-}
+});
 
-// Helper function to calculate prize based on rank
-function calculatePrize(rank, totalPrizePool) {
-  const percentages = [4000, 3000, 2000, 500, 500]; // 40%, 30%, 20%, 5%, 5%
-  if (rank <= 5 && rank > 0) {
-    return (totalPrizePool * percentages[rank - 1]) / 10000;
-  }
-  return 0;
-}
-
-// Get match results for a specific cycle
-router.get('/cycle/:cycleId/results', asyncHandler(async (req, res) => {
+// Get results by date (for date picker functionality)
+router.get('/results/:date', async (req, res) => {
   try {
-    const { cycleId } = req.params;
+    const { date } = req.params;
     
-    console.log(`🎯 Fetching match results for cycle ${cycleId}`);
+    console.log(`🎯 Fetching Oddyssey results for date: ${date}`);
     
-    // Get cycle data
+    // Find the cycle for this date
     const cycleResult = await db.query(`
       SELECT cycle_id, matches_data, is_resolved, cycle_start_time
       FROM oracle.oddyssey_cycles 
-      WHERE cycle_id = $1
-    `, [cycleId]);
+      WHERE DATE(cycle_start_time) = $1
+      ORDER BY cycle_id DESC
+      LIMIT 1
+    `, [date]);
     
     if (cycleResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Cycle not found'
+      return res.json({
+        success: true,
+        data: {
+          date: date,
+          cycleId: null,
+          isResolved: false,
+          matches: [],
+          totalMatches: 0,
+          finishedMatches: 0
+        },
+        message: 'No cycle found for this date'
       });
     }
     
@@ -1999,10 +1126,10 @@ router.get('/cycle/:cycleId/results', asyncHandler(async (req, res) => {
     
     try {
       if (Array.isArray(cycle.matches_data)) {
-        fixtureIds = cycle.matches_data.filter(id => id && typeof id === 'string');
+        fixtureIds = cycle.matches_data.map(match => match.id ? match.id.toString() : null).filter(id => id);
       } else if (typeof cycle.matches_data === 'string') {
         const parsed = JSON.parse(cycle.matches_data);
-        fixtureIds = Array.isArray(parsed) ? parsed.filter(id => id && typeof id === 'string') : [];
+        fixtureIds = Array.isArray(parsed) ? parsed.map(match => match.id ? match.id.toString() : null).filter(id => id) : [];
       }
     } catch (error) {
       console.error('❌ Error parsing matches_data:', error);
@@ -2013,15 +1140,18 @@ router.get('/cycle/:cycleId/results', asyncHandler(async (req, res) => {
       return res.json({
         success: true,
         data: {
-          cycleId: cycleId,
+          date: date,
+          cycleId: cycle.cycle_id,
           isResolved: cycle.is_resolved,
           matches: [],
-          message: 'No matches found for this cycle'
-        }
+          totalMatches: 0,
+          finishedMatches: 0
+        },
+        message: 'No matches found for this date'
       });
     }
     
-    // Get match results with fixture details
+    // Get match results with fixture details for the specific date
     const resultsQuery = `
       SELECT 
         f.id as fixture_id,
@@ -2030,11 +1160,32 @@ router.get('/cycle/:cycleId/results', asyncHandler(async (req, res) => {
         f.league_name,
         f.match_date,
         f.status,
-        fr.home_score,
-        fr.away_score,
-        fr.outcome_1x2,
-        fr.outcome_ou25,
-        fr.finished_at,
+        fr.home_score as home_score,
+        fr.away_score as away_score,
+        COALESCE(fr.outcome_1x2, 
+          CASE 
+            WHEN fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL THEN
+              CASE 
+                WHEN fr.home_score > fr.away_score THEN '1'
+                WHEN fr.home_score = fr.away_score THEN 'X'
+                WHEN fr.home_score < fr.away_score THEN '2'
+                ELSE NULL
+              END
+            ELSE NULL
+          END
+        ) as outcome_1x2,
+        COALESCE(fr.outcome_ou25,
+          CASE 
+            WHEN fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL THEN
+              CASE 
+                WHEN (fr.home_score + fr.away_score) > 2.5 THEN 'over'
+                WHEN (fr.home_score + fr.away_score) < 2.5 THEN 'under'
+                ELSE NULL
+              END
+            ELSE NULL
+          END
+        ) as outcome_ou25,
+        COALESCE(fr.finished_at, f.updated_at) as finished_at,
         CASE 
           WHEN f.status IN ('FT', 'AET', 'PEN') THEN 'finished'
           WHEN f.status IN ('1H', '2H', 'HT') THEN 'live'
@@ -2048,119 +1199,105 @@ router.get('/cycle/:cycleId/results', asyncHandler(async (req, res) => {
       ORDER BY f.match_date ASC
     `;
     
-    const resultsResult = await db.query(resultsQuery, [fixtureIds]);
+    const results = await db.query(resultsQuery, [fixtureIds]);
     
-    const matches = resultsResult.rows.map((row, index) => ({
-      id: row.fixture_id,
-      fixture_id: row.fixture_id,
-      home_team: row.home_team,
-      away_team: row.away_team,
-      league_name: row.league_name,
-      match_date: row.match_date,
-      status: row.match_status,
-      display_order: index + 1,
-      result: {
-        home_score: row.home_score,
-        away_score: row.away_score,
-        outcome_1x2: row.outcome_1x2,
-        outcome_ou25: row.outcome_ou25,
-        finished_at: row.finished_at,
-        is_finished: row.match_status === 'finished'
-      }
+    const matches = results.rows.map(match => ({
+      id: match.fixture_id,
+      fixture_id: match.fixture_id,
+      home_team: match.home_team,
+      away_team: match.away_team,
+      league_name: match.league_name,
+      match_date: match.match_date,
+      status: match.match_status,
+      display_order: 1, // Default order
+      result: match.home_score !== null ? {
+        home_score: match.home_score,
+        away_score: match.away_score,
+        outcome_1x2: match.outcome_1x2,
+        outcome_ou25: match.outcome_ou25,
+        finished_at: match.finished_at,
+        is_finished: match.match_status === 'finished'
+      } : null
     }));
     
-    return res.json({
+    const finishedMatches = matches.filter(match => match.status === 'finished').length;
+    
+    res.json({
       success: true,
       data: {
-        cycleId: cycleId,
+        date: date,
+        cycleId: cycle.cycle_id,
         isResolved: cycle.is_resolved,
         cycleStartTime: cycle.cycle_start_time,
         matches: matches,
         totalMatches: matches.length,
-        finishedMatches: matches.filter(m => m.result.is_finished).length
+        finishedMatches: finishedMatches
+      },
+      meta: {
+        source: 'date_based_query',
+        operation: 'get_results_by_date'
       }
     });
-    
-  } catch (error) {
-    console.error('❌ Error fetching cycle results:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch cycle results'
-    });
-  }
-}));
-
-// Get results by date (for date picker functionality)
-router.get('/results/:date', validateDateParam('date', true, true), asyncHandler(async (req, res) => {
-  try {
-    const { date } = req.params;
-    
-    console.log(`🎯 Fetching Oddyssey results for date: ${date}`);
-    
-    // Use the service method to get results by date
-    const result = await oddysseyMatchSelector.getResultsByDate(date);
-    
-    if (result.success) {
-      return res.json(createSuccessResponse(
-        result.data,
-        {
-          source: 'date_based_query',
-          operation: 'get_results_by_date'
-        },
-        result.message
-      ));
-    } else {
-      return res.status(500).json({
-        success: false,
-        error: result.error,
-        details: result.details
-      });
-    }
     
   } catch (error) {
     console.error('❌ Error fetching results by date:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch results by date'
+      error: 'Failed to fetch results by date',
+      details: error.message
     });
   }
-}));
+});
 
 // Get available dates for date picker
-router.get('/available-dates', asyncHandler(async (req, res) => {
+router.get('/available-dates', async (req, res) => {
   try {
     console.log('🎯 Getting available dates for date picker...');
     
-    // Use the service method to get available dates
-    const result = await oddysseyMatchSelector.getAvailableDates();
+    // Get dates from the last 30 days that have cycles
+    const datesResult = await db.query(`
+      SELECT 
+        DATE(cycle_start_time) as date,
+        cycle_id,
+        is_resolved,
+        COUNT(*) as cycle_count
+      FROM oracle.oddyssey_cycles 
+      WHERE cycle_start_time >= NOW() - INTERVAL '30 days'
+      GROUP BY DATE(cycle_start_time), cycle_id, is_resolved
+      ORDER BY date DESC
+    `);
     
-    if (result.success) {
-      return res.json(createSuccessResponse(
-        result.data,
-        {
-          source: 'date_picker_query',
-          operation: 'get_available_dates'
+    const availableDates = datesResult.rows.map(row => ({
+      date: row.date,
+      cycleId: row.cycle_id,
+      isResolved: row.is_resolved,
+      cycleCount: parseInt(row.cycle_count)
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        availableDates,
+        totalDates: availableDates.length,
+        dateRange: {
+          oldest: availableDates.length > 0 ? availableDates[availableDates.length - 1].date : null,
+          newest: availableDates.length > 0 ? availableDates[0].date : null
         }
-      ));
-    } else {
-      return res.status(500).json({
-        success: false,
-        error: result.error,
-        details: result.details
-      });
-    }
+      },
+      meta: {
+        source: 'date_picker_query',
+        operation: 'get_available_dates'
+      }
+    });
     
   } catch (error) {
-    console.error('❌ Error fetching available dates:', error);
+    console.error('❌ Error getting available dates:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch available dates'
+      error: 'Failed to get available dates',
+      details: error.message
     });
   }
-}));
-
-// Add global error handler for this router
-const { globalErrorHandler } = require('../utils/validation');
-router.use(globalErrorHandler);
+});
 
 module.exports = router;

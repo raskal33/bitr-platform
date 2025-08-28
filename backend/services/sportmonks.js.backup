@@ -1,0 +1,1612 @@
+const axios = require('axios');
+const db = require('../db/db');
+
+class SportMonksService {
+  constructor() {
+    this.apiToken = process.env.SPORTMONKS_API_TOKEN;
+    this.baseUrl = 'https://api.sportmonks.com/v3/football';
+    
+    // Check if API token is configured
+    if (!this.apiToken) {
+      console.warn('⚠️ SPORTMONKS_API_TOKEN not set. Using mock data only.');
+    } else {
+      console.log('✅ SportMonks API token configured');
+    }
+    
+    this.axios = axios.create({
+      baseURL: this.baseUrl,
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+  }
+
+  async fetchUpcomingFixtures(startDate, endDate) {
+    console.log(`📅 Fetching fixtures from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}...`);
+    
+    // Check if API token is configured
+    if (!this.apiToken) {
+      console.warn('⚠️ SPORTMONKS_API_TOKEN not set. Using mock data only.');
+      return [];
+    }
+    
+    console.log(`🔑 API Token configured: ${this.apiToken.substring(0, 8)}...`);
+    
+    let allFixtures = [];
+    
+    // Generate array of dates to fetch day by day (exactly like your example)
+    const getDateArray = (start, end) => {
+      const arr = [];
+      let dt = new Date(start);
+      const endDt = new Date(end);
+      while (dt <= endDt) {
+        arr.push(dt.toISOString().slice(0, 10));
+        dt.setDate(dt.getDate() + 1);
+      }
+      return arr;
+    };
+    
+    const dates = getDateArray(startDate, endDate);
+    console.log(`📅 Will fetch fixtures for ${dates.length} days: ${dates.join(', ')}`);
+    
+    // Fetch day by day using the correct endpoint (exactly like your example)
+    for (const date of dates) {
+      console.log(`📅 Fetching fixtures for ${date}...`);
+      
+      let page = 1;
+      let hasMore = true;
+      let dayFixtures = 0;
+
+      while (hasMore) {
+        try {
+          console.log(`📄 ${date} - Fetching page ${page}...`);
+        
+          // Use the correct endpoint: /fixtures/date/{date} (exactly like your example)
+          const response = await this.axios.get(`/fixtures/date/${date}`, {
+            params: {
+              'api_token': this.apiToken,
+              'include': 'league;participants;odds.bookmaker',
+              'per_page': 50, // Maximum allowed by SportMonks API
+              'page': page
+            }
+          });
+
+          console.log(`📊 ${date} - API Response status: ${response.status}`);
+
+          if (!response.data.data || response.data.data.length === 0) {
+            console.log(`📄 ${date} - No data returned on page ${page}`);
+            hasMore = false;
+            break;
+          }
+
+          // Check pagination to see if there are more pages
+          const pagination = response.data.pagination;
+          if (pagination && !pagination.has_more) {
+            console.log(`📄 ${date} - No more pages available (page ${page} of ${pagination.current_page})`);
+            hasMore = false;
+          }
+
+          const fixtures = response.data.data;
+          console.log(`📊 ${date} - Fetched ${fixtures.length} fixtures from page ${page} (Total: ${pagination?.count || 'unknown'}, Has more: ${pagination?.has_more || false})`);
+          
+          // Critical logging to detect pagination issues
+          if (pagination) {
+            console.log(`📄 ${date} - Pagination details: Current=${pagination.current_page}, Per page=${pagination.per_page}, Total=${pagination.count}, Has more=${pagination.has_more}`);
+            if (pagination.count > 50 && !pagination.has_more && page === 1) {
+              console.warn(`⚠️ ${date} - POTENTIAL DATA LOSS: API reports ${pagination.count} total fixtures but has_more=false on first page!`);
+            }
+          }
+          
+          dayFixtures += fixtures.length;
+
+          // Process each fixture to get complete data
+          for (const fixture of fixtures) {
+            try {
+              // Log odds detection for debugging
+              const oddsCount = fixture.odds ? fixture.odds.length : 0;
+              if (oddsCount > 0) {
+                console.log(`📊 Fixture ${fixture.id} has ${oddsCount} odds from bookmakers:`, 
+                  fixture.odds.map(odd => odd.bookmaker?.name || 'Unknown').slice(0, 3).join(', '));
+              } else {
+                console.log(`⚠️ Fixture ${fixture.id} has no odds`);
+              }
+              
+              // Combine all data - league data should now be included in the response
+              const completeFixture = {
+                ...fixture,
+                odds: fixture.odds,
+                metadata: fixture.metadata || null,
+                participants: fixture.participants || []
+              };
+
+              allFixtures.push(completeFixture);
+            } catch (error) {
+              console.error(`❌ Error processing fixture ${fixture.id}:`, error.message);
+            }
+          }
+
+          page++;
+          
+          // Add delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 250));
+          
+        } catch (error) {
+          console.error(`❌ Error fetching fixtures for ${date} page ${page}:`, error.message);
+          console.error(`❌ Error details:`, error.response?.data || error);
+          hasMore = false;
+        }
+      }
+      
+      console.log(`✅ ${date} - Total fixtures: ${dayFixtures}`);
+      
+      // Delay between days to avoid rate limiting (but not after the last day)
+      if (date !== dates[dates.length - 1]) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    
+    console.log(`✅ Total fixtures fetched across all days: ${allFixtures.length}`);
+    return allFixtures;
+  }
+
+
+  processFixtures(fixtures) {
+    return fixtures.map(fixture => {
+      try {
+        // Extract team names from participants using correct meta.location logic
+        const homeParticipant = fixture.participants?.find(p => p.meta?.location === 'home');
+        const awayParticipant = fixture.participants?.find(p => p.meta?.location === 'away');
+        
+        const homeTeam = homeParticipant?.name || 'Unknown';
+        const awayTeam = awayParticipant?.name || 'Unknown';
+        const homeTeamId = homeParticipant?.id || null;
+        const awayTeamId = awayParticipant?.id || null;
+        
+        // Critical logging to verify team assignment
+        if (fixture.participants) {
+          console.log(`🔍 Fixture ${fixture.id}: Home="${homeTeam}" (ID: ${homeTeamId}), Away="${awayTeam}" (ID: ${awayTeamId})`);
+        }
+
+        // Extract league data from the response (should now be included)
+        const leagueId = fixture.league?.id || fixture.league_id || null;
+        const leagueName = this.formatLeagueName(fixture.league);
+
+        // Filter out youth leagues and women matches
+        const youthKeywords = ['U19', 'U18', 'U17', 'U16', 'U15', 'Youth', 'Junior', 'Reserve', 'B Team', 'U21', 'U23'];
+        const womenKeywords = ['women', 'female', 'ladies'];
+        
+        const isYouthLeague = youthKeywords.some(keyword =>
+          leagueName.toLowerCase().includes(keyword.toLowerCase())
+        );
+        const isWomenMatch = womenKeywords.some(keyword =>
+          leagueName.toLowerCase().includes(keyword.toLowerCase()) ||
+          homeTeam.toLowerCase().includes(keyword.toLowerCase()) ||
+          awayTeam.toLowerCase().includes(keyword.toLowerCase())
+        );
+        
+        // Exclude youth and women matches
+        if (isYouthLeague || isWomenMatch) {
+          console.log(`🚫 Filtering out youth/women league: ${leagueName}`);
+          return null; // Skip this fixture
+        }
+
+        // Extract time data with proper fallbacks and timezone handling
+        let matchDate = fixture.starting_at || fixture.starting_at_timestamp || null;
+        
+        // Critical fix: Ensure match_date is never null to prevent database insertion failures
+        if (!matchDate) {
+          console.warn(`⚠️ Fixture ${fixture.id} has no starting_at, using current date + 1 day as fallback`);
+          const fallbackDate = new Date();
+          fallbackDate.setDate(fallbackDate.getDate() + 1);
+          matchDate = fallbackDate.toISOString();
+        } else if (typeof matchDate === 'number') {
+          // Handle timestamp format
+          matchDate = new Date(matchDate * 1000).toISOString();
+        } else if (typeof matchDate === 'string' && !matchDate.includes('T') && !matchDate.includes('Z')) {
+          // Handle "2025-07-28 13:30:00" format - assume UTC
+          matchDate = matchDate.replace(' ', 'T') + 'Z';
+        }
+        
+        // Validate date format
+        if (matchDate && !Date.parse(matchDate)) {
+          console.warn(`⚠️ Fixture ${fixture.id} has invalid date format: ${matchDate}, using fallback`);
+          const fallbackDate = new Date();
+          fallbackDate.setDate(fallbackDate.getDate() + 1);
+          matchDate = fallbackDate.toISOString();
+        }
+        
+        console.log(`📅 Fixture ${fixture.id} date: ${matchDate}`);
+
+        // Extract venue and referee from metadata
+        const venue = fixture.metadata?.venue || {};
+        const referee = fixture.metadata?.referee || {};
+
+        return {
+          id: fixture.id,
+          name: `${homeTeam} vs ${awayTeam}`,
+          home_team_id: homeTeamId,
+          away_team_id: awayTeamId,
+          home_team: homeTeam,
+          away_team: awayTeam,
+          league_id: leagueId,
+          league_name: leagueName,
+          season_id: fixture.season_id || null,
+          round: fixture.round?.name || null,
+          match_date: matchDate,
+          venue_name: venue.name || null,
+          venue_city: venue.city || null,
+          status: fixture.state?.name || null,
+          referee: referee.name || null,
+          odds: fixture.odds,
+          metadata: fixture.metadata,
+          participants: fixture.participants,
+          league: fixture.league,
+          venue: venue,
+          referee: referee,
+          season: fixture.season,
+          stage: fixture.stage,
+          round_obj: fixture.round,
+          state: fixture.state
+        };
+      } catch (error) {
+        console.error(`❌ Error processing fixture ${fixture.id}:`, error.message);
+        // Don't discard the entire fixture, try to save it with basic data
+        try {
+          // Even in fallback, use correct meta.location logic
+          const fallbackHome = fixture.participants?.find(p => p.meta?.location === 'home');
+          const fallbackAway = fixture.participants?.find(p => p.meta?.location === 'away');
+          
+          return {
+            id: fixture.id,
+            name: `${fallbackHome?.name || 'TBD'} vs ${fallbackAway?.name || 'TBD'}`,
+            home_team_id: fallbackHome?.id || null,
+            away_team_id: fallbackAway?.id || null,
+            home_team: fallbackHome?.name || 'TBD',
+            away_team: fallbackAway?.name || 'TBD',
+            league_id: fixture.league?.id || null,
+            league_name: fixture.league?.name || 'Unknown League',
+            season_id: fixture.season_id || null,
+            round: fixture.round?.name || null,
+            match_date: fixture.starting_at || new Date().toISOString(),
+            venue_name: null,
+            venue_city: null,
+            status: fixture.state?.name || 'Unknown',
+            referee: null,
+            odds: [],
+            metadata: {},
+            participants: fixture.participants || [],
+            league: fixture.league || {},
+            venue: {},
+            referee: {},
+            season: fixture.season,
+            stage: fixture.stage,
+            round_obj: fixture.round,
+            state: fixture.state
+          };
+        } catch (fallbackError) {
+          console.error(`❌ Critical error processing fixture ${fixture.id}, discarding:`, fallbackError.message);
+          return null;
+        }
+      }
+    }).filter(fixture => fixture !== null); // Remove null fixtures
+  }
+
+  // Add league name formatting function like the working implementation
+  formatLeagueName(league) {
+    if (!league || !league.name) return 'Unknown League';
+    
+    console.log('Formatting league:', JSON.stringify(league));
+    
+    // Specific formatting for commonly confused leagues
+    if (league.name === 'Premier League' || league.name === 'EPL') {
+      // Check country in all possible locations
+      const countryId = league.country_id || league.country?.id || 0;
+      const countryName = league.country?.name || '';
+      const countryCode = league.country?.code || league.short_code || '';
+      
+      console.log(`League country info - ID: ${countryId}, Name: ${countryName}, Code: ${countryCode}`);
+      
+      // Look for England indicators
+      if (countryId === 2 || 
+          countryName.toLowerCase().includes('england') || 
+          countryName.toLowerCase().includes('united kingdom') || 
+          countryCode.includes('ENG') || 
+          countryCode.includes('GB')) {
+        return 'England Premier League';
+      } 
+      // Look for Russia indicators
+      else if (countryId === 95 || 
+               countryName.toLowerCase().includes('russia') || 
+               countryCode.includes('RUS')) {
+        return 'Russia Premier League';
+      }
+      
+      // If we get here and have a country name but couldn't specifically identify England/Russia
+      if (countryName) {
+        return `${countryName} Premier League`;
+      }
+    }
+    
+    // Try to extract country info from league code for better identification
+    // Many leagues have codes like "ENG PR" or "RUS PR"
+    if (league.short_code) {
+      const code = league.short_code.toUpperCase();
+      if (code.startsWith('ENG')) {
+        return `England ${league.name}`;
+      } else if (code.startsWith('RUS')) {
+        return `Russia ${league.name}`;
+      }
+    }
+    
+    // If no special formatting needed, return the original name
+    return league.name;
+  }
+
+  async fetchFixtureOdds(fixtureId) {
+    try {
+      const response = await this.axios.get(`/odds/fixtures/${fixtureId}`, {
+        params: {
+          'api_token': this.apiToken
+        }
+      });
+      
+      return response.data.data || [];
+    } catch (error) {
+      console.error(`❌ Error fetching odds for fixture ${fixtureId}:`, error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch fixture results for completed matches
+   */
+  async fetchFixtureResults(fixtureIds) {
+    try {
+      console.log(`🔍 Fetching results for ${fixtureIds.length} fixtures...`);
+      
+      const results = [];
+      for (const fixtureId of fixtureIds) {
+    try {
+      const response = await this.axios.get(`/fixtures/${fixtureId}`, {
+        params: {
+          'api_token': this.apiToken,
+              'include': 'scores;participants'
+            }
+          });
+          
+          if (response.data.data) {
+            const fixture = response.data.data;
+            
+            // Check if fixture is completed
+            if (fixture.state?.state === 'FT' || fixture.state?.state === 'AET' || fixture.state?.state === 'PEN') {
+              
+              // IMPORTANT: Use 90-minute scores only (exclude extra time/penalties)
+              // Try to find the specific full-time (90 min) score first
+              let fullTimeScore = fixture.scores?.find(s => s.description === 'FT' || s.description === 'FULLTIME');
+              
+              // Fallback to HT + 2nd half scores if available
+              if (!fullTimeScore) {
+                const currentScore = fixture.scores?.find(s => s.description === 'CURRENT');
+                // Only use current score if match is FT (finished in regular time)
+                if (fixture.state?.state === 'FT' && currentScore) {
+                  fullTimeScore = currentScore;
+                }
+              }
+              
+              // If no proper 90-minute score found, log and skip
+              if (!fullTimeScore) {
+                console.log(`⚠️ No 90-minute score found for fixture ${fixtureId}, available scores:`, 
+                  fixture.scores?.map(s => s.description).join(', ') || 'none');
+                continue;
+              }
+              
+              const result = {
+                fixture_id: fixture.id,
+                home_team: fixture.participants?.find(p => p.meta?.location === 'home')?.name,
+                away_team: fixture.participants?.find(p => p.meta?.location === 'away')?.name,
+                home_score: fullTimeScore.score?.participant_1 || 0,
+                away_score: fullTimeScore.score?.participant_2 || 0,
+                status: fixture.state?.state,
+                match_date: fixture.starting_at,
+                score_type: fullTimeScore.description // For debugging
+              };
+              
+              results.push(result);
+              console.log(`✅ Found result for fixture ${fixtureId}: ${result.home_team} ${result.home_score}-${result.away_score} ${result.away_team}`);
+            } else {
+              console.log(`⏳ Fixture ${fixtureId} not completed yet (status: ${fixture.state?.state})`);
+            }
+          }
+          
+          // Add delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 250));
+          
+    } catch (error) {
+          console.error(`❌ Error fetching result for fixture ${fixtureId}:`, error.message);
+        }
+      }
+      
+      console.log(`✅ Fetched results for ${results.length}/${fixtureIds.length} fixtures`);
+      return results;
+      
+    } catch (error) {
+      console.error('❌ Error in fetchFixtureResults:', error);
+      return [];
+    }
+  }
+
+  async saveFixtures(fixtures) {
+    console.log(`🔄 Starting to save ${fixtures.length} fixtures using bulk operations...`);
+    
+    // Ensure we have a single database connection for the entire operation
+    if (!db.isConnected) {
+      await db.connect();
+    }
+    
+    try {
+      const fixtureValues = [];
+      const oddsValues = [];
+      
+      for (const fixture of fixtures) {
+        try {
+          // Save all fixtures, but note which ones have odds
+          const hasOdds = fixture.odds && fixture.odds.length > 0;
+          if (!hasOdds) {
+            console.log(`📊 Fixture ${fixture.id} has no odds - saving anyway for system functionality`);
+          }
+          
+          // Log detailed odds info for debugging
+          if (hasOdds) {
+            console.log(`✅ Fixture ${fixture.id} has ${fixture.odds.length} odds from bookmakers:`, 
+              fixture.odds.map(odd => `${odd.bookmaker?.name || 'Unknown'}: ${odd.market_description || 'Unknown market'}`).slice(0, 3).join(', '));
+          }
+
+          // Format fixture data with proper fallbacks matching database schema order
+          // Schema: id, name, home_team, away_team, home_team_id, away_team_id, match_date, league_id, league_name, venue_id, referee_id, season_id, round_id, state_id, status, starting_at, result_info, leg, venue, referee, league, season, stage, round, state, participants, team_assignment_validated, odds_mapping_validated, processing_errors
+          const formattedFixture = [
+            fixture.id,
+            fixture.name || `${fixture.participants?.[0]?.name || 'TBD'} vs ${fixture.participants?.[1]?.name || 'TBD'}`,
+            fixture.participants?.[0]?.name || 'TBD',
+            fixture.participants?.[1]?.name || 'TBD',
+            fixture.home_team_id || null, // home_team_id
+            fixture.away_team_id || null, // away_team_id
+            fixture.match_date, // match_date - CRITICAL: Use the processed match_date directly
+            fixture.league?.id || null, // league_id
+            fixture.league?.name || 'Unknown League', // league_name
+            fixture.venue?.id || null, // venue_id
+            fixture.referee?.id || null, // referee_id
+            fixture.season?.id || null, // season_id
+            fixture.round?.id || null, // round_id
+            fixture.state?.id || null, // state_id
+            fixture.state?.state || 'NS', // status
+            fixture.starting_at || fixture.match_date, // starting_at
+            null, // result_info - will be populated when match is finished
+            null, // leg - not used for regular fixtures
+            JSON.stringify(fixture.venue || {}), // venue
+            JSON.stringify(fixture.referee || {}), // referee
+            JSON.stringify(fixture.league || {}), // league
+            JSON.stringify(fixture.season || {}), // season
+            JSON.stringify(fixture.stage || {}), // stage
+            JSON.stringify(fixture.round || {}), // round
+            JSON.stringify(fixture.state || {}), // state
+            JSON.stringify(fixture.participants || []), // participants
+            true, // team_assignment_validated - mark as validated since we processed teams
+            hasOdds, // odds_mapping_validated - true if we have odds
+            JSON.stringify({processed_at: new Date().toISOString(), has_odds: hasOdds}) // processing_errors - metadata
+          ];
+          
+          fixtureValues.push(formattedFixture);
+          console.log(`✅ Fixture ${fixture.id} saved with odds from SportMonks`);
+          
+          // Process odds - save all odds from SportMonks API
+          if (fixture.odds && fixture.odds.length > 0) {
+            // Group odds by bookmaker
+            const oddsByBookmaker = {};
+            fixture.odds.forEach(odd => {
+              // Use bookmaker_id (modern API) or fallback to bookmaker.id (legacy)
+              const bookmakerId = odd.bookmaker_id || (odd.bookmaker && odd.bookmaker.id);
+              if (bookmakerId) {
+                if (!oddsByBookmaker[bookmakerId]) {
+                  oddsByBookmaker[bookmakerId] = {
+                    bookmaker: odd.bookmaker || { id: bookmakerId, name: `Bookmaker ${bookmakerId}` },
+                    odds: []
+                  };
+                }
+                oddsByBookmaker[bookmakerId].odds.push(odd);
+              }
+            });
+            
+            // Try bet365 first, then fallback to other reliable bookmakers
+            const preferredBookmakers = [2, 28, 39, 35]; // bet365, bwin, betway, 1xbet
+            let selectedBookmakerData = null;
+            let selectedBookmakerName = '';
+            
+            for (const bookmakerId of preferredBookmakers) {
+              if (oddsByBookmaker[bookmakerId]) {
+                selectedBookmakerData = oddsByBookmaker[bookmakerId];
+                selectedBookmakerName = selectedBookmakerData.bookmaker.name;
+                console.log(`🔍 Processing ${selectedBookmakerName} (ID: ${bookmakerId}) for fixture ${fixture.id}`);
+                break;
+              }
+            }
+            
+            if (selectedBookmakerData) {
+              const bookmakerData = selectedBookmakerData;
+                const bookmaker = bookmakerData.bookmaker;
+                const bookmakerOdds = bookmakerData.odds;
+                
+                                  // Initialize odds object for this bookmaker
+                  const oddsRecord = {
+                    fixture_id: fixture.id,
+                    ft_home_odds: null,
+                    ft_draw_odds: null,
+                    ft_away_odds: null,
+                    ht_home_odds: null,
+                    ht_draw_odds: null,
+                    ht_away_odds: null,
+                    over_25_odds: null,
+                    under_25_odds: null,
+                    over_35_odds: null,
+                    under_35_odds: null,
+                    btts_yes_odds: null,
+                    btts_no_odds: null,
+                    bookmaker_id: bookmaker.id,
+                    bookmaker_name: selectedBookmakerName,
+                    raw_odds: []
+                  };
+                  
+                // Process each odd for this bookmaker
+                for (const odd of bookmakerOdds) {
+                    const marketDescription = odd.market_description || '';
+                    const label = odd.label || '';
+                    const value = parseFloat(odd.value) || null;
+
+                  // Only process specific market IDs to avoid wrong odds
+                  const validMarketIds = [1, 14, 80, 31]; // 1=1X2, 14=BTTS, 80=Over/Under, 31=HT Result
+                  const isValidMarket = validMarketIds.includes(odd.market_id) || 
+                                      marketDescription.toLowerCase().includes('full time result') ||
+                                      marketDescription.toLowerCase().includes('both teams to score') ||
+                                      marketDescription.toLowerCase().includes('goals over/under') ||
+                                      marketDescription.toLowerCase().includes('half time result') ||
+                                      marketDescription.toLowerCase().includes('halftime result');
+                  
+                  if (value && value > 0 && value < 100 && isValidMarket) {
+                      // Store raw odd data
+                      oddsRecord.raw_odds.push({
+                      id: odd.id,
+                      market_id: odd.market_id,
+                        market_description: marketDescription,
+                        label: label,
+                        value: value,
+                      probability: odd.probability
+                      });
+
+                    // Map odds to appropriate columns using market IDs for accuracy
+                      const marketLower = marketDescription.toLowerCase();
+                      const labelLower = label.toLowerCase();
+
+                      // Full Time Result (1X2) - Market ID 1
+                    if (odd.market_id === 1 || 
+                        marketLower.includes('full time result') || 
+                        marketLower.includes('match result') ||
+                        marketLower.includes('1x2')) {
+                        if (labelLower.includes('home') || label === '1' || labelLower.includes('1')) {
+                          oddsRecord.ft_home_odds = value;
+                        } else if (labelLower.includes('draw') || label === 'X' || labelLower.includes('x')) {
+                          oddsRecord.ft_draw_odds = value;
+                        } else if (labelLower.includes('away') || label === '2' || labelLower.includes('2')) {
+                          oddsRecord.ft_away_odds = value;
+                        }
+                      }
+                    // Half Time Result (1X2) - Market ID 31
+                    else if (odd.market_id === 31 ||
+                             marketLower.includes('half time result') ||
+                             marketLower.includes('ht result') ||
+                             marketLower.includes('first half result') ||
+                             marketLower.includes('1st half result') ||
+                             marketLower.includes('half-time result') ||
+                             marketLower.includes('halftime result') ||
+                             marketLower.includes('1st half 1x2') ||
+                             marketLower.includes('half time 1x2')) {
+                        if (labelLower.includes('home') || label === '1' || labelLower.includes('1')) {
+                          oddsRecord.ht_home_odds = value;
+                        } else if (labelLower.includes('draw') || label === 'X' || labelLower.includes('x')) {
+                          oddsRecord.ht_draw_odds = value;
+                        } else if (labelLower.includes('away') || label === '2' || labelLower.includes('2')) {
+                          oddsRecord.ht_away_odds = value;
+                        }
+                      }
+                    // Over/Under Goals - Market ID 80 (distinguish between 2.5 and 3.5 lines)
+                    else if (odd.market_id === 80 ||
+                             marketLower.includes('goals over/under') ||
+                             marketLower.includes('total goals') ||
+                             marketLower.includes('over/under')) {
+                      
+                      // Check if this is 2.5 line
+                      const is25Line = odd.name === '2.5' || 
+                                       odd.total === '2.5' ||
+                                       marketLower.includes('over/under 2.5') ||
+                                       marketLower.includes('total goals 2.5') ||
+                                       (odd.name && odd.name.includes('2.5')) ||
+                                       (odd.total && odd.total.includes('2.5'));
+                      
+                      // Check if this is 3.5 line  
+                      const is35Line = odd.name === '3.5' ||
+                                       odd.total === '3.5' ||
+                                       marketLower.includes('over/under 3.5') ||
+                                       marketLower.includes('total goals 3.5') ||
+                                       (odd.name && odd.name.includes('3.5')) ||
+                                       (odd.total && odd.total.includes('3.5')) ||
+                                       (odd.total && parseFloat(odd.total) === 3.5);
+                      
+                      if (is25Line) {
+                        if (labelLower.includes('over')) {
+                          oddsRecord.over_25_odds = value;
+                        } else if (labelLower.includes('under')) {
+                          oddsRecord.under_25_odds = value;
+                        }
+                      } else if (is35Line) {
+                        if (labelLower.includes('over')) {
+                          oddsRecord.over_35_odds = value;
+                        } else if (labelLower.includes('under')) {
+                          oddsRecord.under_35_odds = value;
+                        }
+                      }
+                    }
+                      // Both Teams to Score - Market ID 14
+                    else if (odd.market_id === 14 ||
+                             marketLower.includes('both teams to score') ||
+                             marketLower.includes('btts')) {
+                        if (labelLower.includes('yes')) {
+                          oddsRecord.btts_yes_odds = value;
+                        } else if (labelLower.includes('no')) {
+                          oddsRecord.btts_no_odds = value;
+                        }
+                      }
+                    }
+                  }
+                  
+                  // Create individual market records for each valid odds
+                  const markets = [];
+                  
+                  if (oddsRecord.ft_home_odds) markets.push(['1', 'Home', oddsRecord.ft_home_odds, 'Full Time Result']);
+                  if (oddsRecord.ft_draw_odds) markets.push(['1', 'Draw', oddsRecord.ft_draw_odds, 'Full Time Result']);
+                  if (oddsRecord.ft_away_odds) markets.push(['1', 'Away', oddsRecord.ft_away_odds, 'Full Time Result']);
+                  if (oddsRecord.over_25_odds) markets.push(['80', 'Over', oddsRecord.over_25_odds, 'Goals Over/Under 2.5']);
+                  if (oddsRecord.under_25_odds) markets.push(['80', 'Under', oddsRecord.under_25_odds, 'Goals Over/Under 2.5']);
+                  if (oddsRecord.over_35_odds) markets.push(['81', 'Over', oddsRecord.over_35_odds, 'Goals Over/Under 3.5']);
+                  if (oddsRecord.under_35_odds) markets.push(['81', 'Under', oddsRecord.under_35_odds, 'Goals Over/Under 3.5']);
+                  if (oddsRecord.btts_yes_odds) markets.push(['14', 'Yes', oddsRecord.btts_yes_odds, 'Both Teams to Score']);
+                  if (oddsRecord.btts_no_odds) markets.push(['14', 'No', oddsRecord.btts_no_odds, 'Both Teams to Score']);
+                  if (oddsRecord.ht_home_odds) markets.push(['31', 'Home', oddsRecord.ht_home_odds, 'Half Time Result']);
+                  if (oddsRecord.ht_draw_odds) markets.push(['31', 'Draw', oddsRecord.ht_draw_odds, 'Half Time Result']);
+                  if (oddsRecord.ht_away_odds) markets.push(['31', 'Away', oddsRecord.ht_away_odds, 'Half Time Result']);
+                  
+                  // Add each market as a separate record with proper ID generation
+                  markets.forEach(([marketId, label, value, description], index) => {
+                    // Generate unique ID: fixture_bookmaker_market_label
+                    const uniqueId = `${oddsRecord.fixture_id}_${oddsRecord.bookmaker_id}_${marketId}_${label.toLowerCase().replace(/\s+/g, '_')}`;
+                    
+                    oddsValues.push([
+                      uniqueId,                    // id (VARCHAR PRIMARY KEY)
+                      oddsRecord.fixture_id,      // fixture_id
+                      marketId,                   // market_id  
+                      oddsRecord.bookmaker_id,    // bookmaker_id
+                      label,                      // label
+                      value,                      // value (numeric)
+                      description,                // market_description
+                      index + 1,                  // sort_order
+                      oddsRecord.bookmaker_name   // bookmaker_name
+                    ]);
+                  });
+                  
+                  // Only process one bookmaker per fixture to avoid duplicates
+                  break;
+              }
+            }
+        } catch (error) {
+          console.error(`❌ Error processing fixture ${fixture.id}:`, error.message);
+        }
+      }
+      
+      console.log(`📊 Prepared ${fixtureValues.length} fixtures and ${oddsValues.length} odds for bulk insert`);
+      
+      // Bulk insert fixtures in smaller batches to avoid timeouts
+      if (fixtureValues.length > 0) {
+        try {
+          console.log(`🔧 DEBUG: About to execute fixture query with ${fixtureValues.flat().length} parameters`);
+          
+          const BATCH_SIZE = 50; // Process 50 fixtures at a time
+          let insertedFixtures = 0;
+          
+          for (let i = 0; i < fixtureValues.length; i += BATCH_SIZE) {
+            const batch = fixtureValues.slice(i, i + BATCH_SIZE);
+            
+            const fixtureQuery = `
+              INSERT INTO oracle.fixtures (
+                id, name, home_team, away_team, home_team_id, away_team_id, match_date, league_id, league_name, venue_id, referee_id, season_id, round_id, state_id, status, starting_at, result_info, leg, venue, referee, league, season, stage, round, state, participants, team_assignment_validated, odds_mapping_validated, processing_errors
+              ) VALUES ${batch.map((_, idx) => `($${idx * 29 + 1}, $${idx * 29 + 2}, $${idx * 29 + 3}, $${idx * 29 + 4}, $${idx * 29 + 5}, $${idx * 29 + 6}, $${idx * 29 + 7}, $${idx * 29 + 8}, $${idx * 29 + 9}, $${idx * 29 + 10}, $${idx * 29 + 11}, $${idx * 29 + 12}, $${idx * 29 + 13}, $${idx * 29 + 14}, $${idx * 29 + 15}, $${idx * 29 + 16}, $${idx * 29 + 17}, $${idx * 29 + 18}, $${idx * 29 + 19}, $${idx * 29 + 20}, $${idx * 29 + 21}, $${idx * 29 + 22}, $${idx * 29 + 23}, $${idx * 29 + 24}, $${idx * 29 + 25}, $${idx * 29 + 26}, $${idx * 29 + 27}, $${idx * 29 + 28}, $${idx * 29 + 29})`).join(', ')}
+              ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                home_team = EXCLUDED.home_team,
+                away_team = EXCLUDED.away_team,
+                home_team_id = EXCLUDED.home_team_id,
+                away_team_id = EXCLUDED.away_team_id,
+                match_date = EXCLUDED.match_date,
+                league_id = EXCLUDED.league_id,
+                league_name = EXCLUDED.league_name,
+                venue_id = EXCLUDED.venue_id,
+                referee_id = EXCLUDED.referee_id,
+                season_id = EXCLUDED.season_id,
+                round_id = EXCLUDED.round_id,
+                state_id = EXCLUDED.state_id,
+                status = EXCLUDED.status,
+                starting_at = EXCLUDED.starting_at,
+                result_info = EXCLUDED.result_info,
+                leg = EXCLUDED.leg,
+                venue = EXCLUDED.venue,
+                referee = EXCLUDED.referee,
+                league = EXCLUDED.league,
+                season = EXCLUDED.season,
+                stage = EXCLUDED.stage,
+                round = EXCLUDED.round,
+                state = EXCLUDED.state,
+                participants = EXCLUDED.participants,
+                team_assignment_validated = EXCLUDED.team_assignment_validated,
+                odds_mapping_validated = EXCLUDED.odds_mapping_validated,
+                processing_errors = EXCLUDED.processing_errors,
+                updated_at = NOW()
+            `;
+            
+            const batchParams = batch.flat();
+            await db.query(fixtureQuery, batchParams);
+            insertedFixtures += batch.length;
+            console.log(`✅ Batch inserted ${insertedFixtures}/${fixtureValues.length} fixtures`);
+          }
+          
+          console.log(`✅ Bulk inserted all ${fixtureValues.length} fixtures`);
+        } catch (fixtureError) {
+          console.error('❌ FIXTURE INSERT ERROR:', fixtureError.message);
+          console.error('   SQL State:', fixtureError.code);
+          console.error('   Position:', fixtureError.position);
+          console.error('   Detail:', fixtureError.detail);
+          throw fixtureError;
+        }
+      }
+      
+      // Bulk insert odds with new structure in smaller batches
+      if (oddsValues.length > 0) {
+        try {
+          console.log(`🔧 DEBUG: About to insert ${oddsValues.length} odds records`);
+          console.log(`🔧 DEBUG: First odds record:`, oddsValues[0]);
+          
+          const ODDS_BATCH_SIZE = 100; // Process 100 odds at a time
+          let insertedOdds = 0;
+          
+          for (let i = 0; i < oddsValues.length; i += ODDS_BATCH_SIZE) {
+            const batchSlice = oddsValues.slice(i, i + ODDS_BATCH_SIZE);
+            
+            // The batch already contains the correct format: [fixtureId, marketId, bookmakerId, label, value, description, sortOrder]
+            const batch = batchSlice;
+            
+            // Process odds in smaller batches to avoid constraint issues
+            const SMALL_BATCH_SIZE = 50;
+            for (let j = 0; j < batch.length; j += SMALL_BATCH_SIZE) {
+              const smallBatch = batch.slice(j, j + SMALL_BATCH_SIZE);
+              
+                              try {
+                  const oddsQuery = `
+                    INSERT INTO oracle.fixture_odds (
+                      id, fixture_id, market_id, bookmaker_id, label, value, market_description, sort_order, bookmaker_name
+                    ) VALUES ${smallBatch.map((_, idx) => `($${idx * 9 + 1}, $${idx * 9 + 2}, $${idx * 9 + 3}, $${idx * 9 + 4}, $${idx * 9 + 5}, $${idx * 9 + 6}, $${idx * 9 + 7}, $${idx * 9 + 8}, $${idx * 9 + 9})`).join(', ')}
+                    ON CONFLICT (id) DO UPDATE SET
+                      value = EXCLUDED.value,
+                      updated_at = NOW()
+                  `;
+                  
+                  const oddsParams = smallBatch.flat();
+                  const result = await db.query(oddsQuery, oddsParams);
+                  insertedOdds += smallBatch.length;
+                  console.log(`✅ Batch inserted ${smallBatch.length} odds records (affected ${result.rowCount} rows)`);
+                } catch (oddsInsertError) {
+                  // If batch insert fails, try individual inserts to handle duplicates
+                  console.warn(`⚠️ Batch odds insert failed, trying individual inserts: ${oddsInsertError.message}`);
+                  for (const singleOdd of smallBatch) {
+                    try {
+                      const singleQuery = `
+                        INSERT INTO oracle.fixture_odds (
+                          id, fixture_id, market_id, bookmaker_id, label, value, market_description, sort_order, bookmaker_name
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        ON CONFLICT (id) DO UPDATE SET
+                          value = EXCLUDED.value,
+                          updated_at = NOW()
+                      `;
+                      await db.query(singleQuery, singleOdd);
+                      insertedOdds++;
+                    } catch (singleError) {
+                      // Skip duplicates silently
+                      if (!singleError.message.includes('duplicate') && !singleError.message.includes('unique')) {
+                        console.warn(`⚠️ Failed to insert single odds record: ${singleError.message}`);
+                      }
+                    }
+                  }
+                }
+            }
+          }
+          
+          console.log(`✅ Bulk inserted all ${oddsValues.length} odds`);
+          
+        } catch (oddsError) {
+          console.error('❌ ODDS INSERT ERROR:', oddsError.message);
+          console.error('   SQL State:', oddsError.code);
+          console.error('   Position:', oddsError.position);
+          console.error('   Detail:', oddsError.detail);
+          console.error('   Stack:', oddsError.stack);
+          
+          // Don't throw here - let's see if we can continue
+          console.log('⚠️ Continuing despite odds insert error...');
+        }
+      } else {
+        console.log('⚠️ No odds to insert - oddsValues array is empty!');
+      }
+      
+      console.log(`✅ Successfully saved ${fixtureValues.length} fixtures with ${oddsValues.length} odds using bulk operations`);
+      
+      // Return the actual counts for proper logging
+      return {
+        fixturesInserted: fixtureValues.length,
+        oddsInserted: oddsValues.length
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in bulk save operation:', error.message);
+      throw error;
+    }
+  }
+
+  async saveOdds(odds) {
+    await db.transaction(async (client) => {
+      let savedCount = 0;
+      
+      // Group odds by fixture_id
+      const oddsByFixture = {};
+      
+      for (const odd of odds) {
+        if (!oddsByFixture[odd.fixture_id]) {
+          oddsByFixture[odd.fixture_id] = [];
+        }
+        oddsByFixture[odd.fixture_id].push(odd);
+      }
+      
+      // Process each fixture's odds
+      for (const [fixtureId, fixtureOdds] of Object.entries(oddsByFixture)) {
+        try {
+          // Try bet365 first, then fallback to other reliable bookmakers
+          const preferredBookmakers = [2, 28, 39, 35]; // bet365, bwin, betway, 1xbet
+          let selectedOdds = null;
+          let selectedBookmakerName = '';
+          
+          for (const bookmakerId of preferredBookmakers) {
+            const bookmakerOdds = fixtureOdds.filter(odd => odd.bookmaker_id === bookmakerId);
+            if (bookmakerOdds.length > 0) {
+              selectedOdds = bookmakerOdds;
+              selectedBookmakerName = bookmakerOdds[0].bookmaker?.name || `Bookmaker ${bookmakerId}`;
+              console.log(`📊 Using ${selectedBookmakerName} (ID: ${bookmakerId}) for fixture ${fixtureId}`);
+              break;
+            }
+          }
+          
+          if (selectedOdds && selectedOdds.length > 0) {
+            // Extract specific market types using correct market IDs
+            // Full Time 1X2 (Market ID 1)
+            let homeOdds = this.extractOddsValue(selectedOdds, 1, 'Home');
+            let drawOdds = this.extractOddsValue(selectedOdds, 1, 'Draw');
+            let awayOdds = this.extractOddsValue(selectedOdds, 1, 'Away');
+            
+            // Over/Under 2.5 (Market ID 80)
+            let over25Odds = this.extractOddsValue(selectedOdds, 80, 'Over', '2.5');
+            let under25Odds = this.extractOddsValue(selectedOdds, 80, 'Under', '2.5');
+            
+            // Over/Under 3.5 (Market ID 80)
+            let over35Odds = this.extractOddsValue(selectedOdds, 80, 'Over', '3.5');
+            let under35Odds = this.extractOddsValue(selectedOdds, 80, 'Under', '3.5');
+            
+            // Both Teams to Score (Market ID 14)
+            let bttsYesOdds = this.extractOddsValue(selectedOdds, 14, 'Yes', null, 'Both Teams To Score');
+            let bttsNoOdds = this.extractOddsValue(selectedOdds, 14, 'No', null, 'Both Teams To Score');
+            
+            // Half Time 1X2 (Market ID 31)
+            let htHomeOdds = this.extractOddsValue(selectedOdds, 31, 'Home');
+            let htDrawOdds = this.extractOddsValue(selectedOdds, 31, 'Draw');
+            let htAwayOdds = this.extractOddsValue(selectedOdds, 31, 'Away');
+            
+            // Validate 1X2 odds - they should be different
+            if (homeOdds && drawOdds && homeOdds === drawOdds) {
+              console.warn(`⚠️ Corrupted 1X2 odds detected for fixture ${fixtureId}: Home=${homeOdds}, Draw=${drawOdds}`);
+              // Don't use corrupted data
+              homeOdds = null;
+              drawOdds = null;
+            }
+            
+            // Validate BTTS odds - they should be different
+            if (bttsYesOdds && bttsNoOdds && bttsYesOdds === bttsNoOdds) {
+              console.warn(`⚠️ Corrupted BTTS odds detected for fixture ${fixtureId}: Yes=${bttsYesOdds}, No=${bttsNoOdds}`);
+              // Don't use corrupted data
+              bttsYesOdds = null;
+              bttsNoOdds = null;
+            }
+            
+            // Create structured odds data for JSONB storage
+            const oddsData = {
+              // Full Time 1X2 (required for both guided and Oddyssey)
+              home: homeOdds,
+              draw: drawOdds,
+              away: awayOdds,
+              
+              // Over/Under 2.5 (required for both guided and Oddyssey)
+              over25: over25Odds,
+              under25: under25Odds,
+              
+              // Over/Under 3.5 (required for guided markets only)
+              over35: over35Odds,
+              under35: under35Odds,
+              
+              // Both Teams to Score (required for guided markets only)
+              bttsYes: bttsYesOdds,
+              bttsNo: bttsNoOdds,
+              
+              // Half Time 1X2 (required for guided markets only)
+              htHome: htHomeOdds,
+              htDraw: htDrawOdds,
+              htAway: htAwayOdds,
+              
+              // Metadata
+              bookmaker: selectedBookmakerName,
+              updatedAt: new Date().toISOString()
+            };
+            
+          const result = await client.query(`
+            INSERT INTO oracle.fixture_odds (
+                  fixture_id, bookmaker_id, value, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET
+                  value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at
+          `, [
+              fixtureId,
+                2, // bet365 bookmaker_id
+                JSON.stringify(oddsData),
+              new Date(),
+              new Date()
+          ]);
+          
+          savedCount++;
+          }
+        } catch (error) {
+          console.error(`❌ Error saving odds for fixture ${fixtureId}:`, error.message);
+        }
+      }
+      
+      console.log(`✅ Saved ${savedCount} odds to database`);
+    });
+  }
+
+  // Helper method to extract odds values from the API response using market IDs
+  extractOddsValue(odds, marketId, label, overUnderLine = null, marketDescription = null) {
+    if (Array.isArray(odds)) {
+      // First try preferred bookmakers in order
+      const preferredBookmakers = [2, 28, 39, 35]; // bet365, bwin, betway, 1xbet
+      let odd = null;
+      
+      for (const bookmakerId of preferredBookmakers) {
+        odd = odds.find(o => {
+          const marketMatch = o.market_id === marketId;
+          const labelMatch = o.label && 
+            (o.label.toLowerCase() === label.toLowerCase() ||
+             o.label.toLowerCase().includes(label.toLowerCase()) ||
+             label.toLowerCase().includes(o.label.toLowerCase()));
+          
+          // For Over/Under markets, also check the specific line (2.5, 3.5, etc.)
+          const lineMatch = !overUnderLine || (o.name && o.name === overUnderLine);
+          
+          // For specific markets, check market description if provided
+          const descriptionMatch = !marketDescription || 
+            (o.market_description && o.market_description.toLowerCase().includes(marketDescription.toLowerCase()));
+          
+          return marketMatch && labelMatch && lineMatch && descriptionMatch && 
+                 o.bookmaker && o.bookmaker.id === bookmakerId;
+        });
+        
+        if (odd) {
+          console.log(`📊 Found odds for market ${marketId} ${label} from bookmaker ${bookmakerId}`);
+          break;
+        }
+      }
+      
+      
+      
+      // Additional validation for specific markets to avoid wrong market data
+      if (odd) {
+        // For Over/Under market (ID 80), ensure it's actually Goals Over/Under
+        if (marketId === 80 && odd.market_description) {
+          const validDescriptions = ['Goals Over/Under', 'Goals Over Under', 'Over/Under', 'Over Under'];
+          const isValidMarket = validDescriptions.some(desc => 
+            odd.market_description.toLowerCase().includes(desc.toLowerCase())
+          );
+          
+          if (!isValidMarket) {
+            console.warn(`⚠️ Wrong market for Over/Under: ${odd.market_description}, skipping`);
+            return null;
+          }
+        }
+        
+        // For 1X2 market (ID 1), ensure it's actually Full Time Result
+        if (marketId === 1 && odd.market_description) {
+          const validDescriptions = ['Full Time Result', 'Fulltime Result', '1X2', 'Match Result'];
+          const isValidMarket = validDescriptions.some(desc => 
+            odd.market_description.toLowerCase().includes(desc.toLowerCase())
+          );
+          
+          if (!isValidMarket) {
+            console.warn(`⚠️ Wrong market for 1X2: ${odd.market_description}, skipping`);
+            return null;
+          }
+        }
+        
+        // For BTTS market (ID 14), ensure it's actually Both Teams to Score
+        if (marketId === 14 && odd.market_description) {
+          const validDescriptions = ['Both Teams to Score', 'Both Teams To Score', 'BTTS'];
+          const isValidMarket = validDescriptions.some(desc => 
+            odd.market_description.toLowerCase().includes(desc.toLowerCase())
+          );
+          
+          if (!isValidMarket) {
+            console.warn(`⚠️ Wrong market for BTTS: ${odd.market_description}, skipping`);
+            return null;
+          }
+        }
+        
+        // For Half Time Result market (ID 31), ensure it's actually Half Time 1X2
+        if (marketId === 31 && odd.market_description) {
+          const validDescriptions = ['Half Time Result', 'Halftime Result', 'HT Result', '1st Half Result', 'First Half Result'];
+          const isValidMarket = validDescriptions.some(desc => 
+            odd.market_description.toLowerCase().includes(desc.toLowerCase())
+          );
+          
+          if (!isValidMarket) {
+            console.warn(`⚠️ Wrong market for Half Time 1X2: ${odd.market_description}, skipping`);
+            return null;
+          }
+        }
+      }
+      
+      return odd ? parseFloat(odd.value) : null;
+    }
+    return null;
+  }
+
+  async fetchAndSaveFixtures() {
+    try {
+      console.log('🚀 Starting SMART fixture fetch process...');
+      
+      // First fetch and save leagues
+      console.log('🏆 Fetching and saving leagues first...');
+      await this.fetchAndSaveLeagues();
+      
+      // Check if this is initial 7-day fetch or daily incremental fetch
+      const isInitialFetch = await this.needsInitialFetch();
+      
+      if (isInitialFetch) {
+        console.log('📅 INITIAL FETCH: Getting 7 days of fixtures...');
+        return await this.performInitial7DayFetch();
+      } else {
+        console.log('📅 INCREMENTAL FETCH: Getting next day only...');
+        return await this.performIncrementalFetch();
+      }
+      
+    } catch (error) {
+      console.error('❌ Error in fetchAndSaveFixtures:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if we need to do initial 7-day fetch or incremental fetch
+   */
+  async needsInitialFetch() {
+    try {
+      // Check if we have fixtures for TODAY and the next 6 days (7 days total)
+      const db = require('../db/db');
+      
+      // First check: Do we have fixtures for TODAY? (Critical for Oddyssey)
+      const todayResult = await db.query(`
+        SELECT COUNT(*) as today_count 
+        FROM oracle.fixtures 
+        WHERE DATE(match_date) = CURRENT_DATE
+      `);
+      
+      const todayCount = parseInt(todayResult.rows[0].today_count);
+      
+      // Second check: Total fixtures in next 7 days
+      const totalResult = await db.query(`
+        SELECT COUNT(*) as fixture_count 
+        FROM oracle.fixtures 
+        WHERE DATE(match_date) BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '6 days'
+      `);
+      
+      const fixtureCount = parseInt(totalResult.rows[0].fixture_count);
+      console.log(`📊 Found ${todayCount} fixtures for TODAY, ${fixtureCount} total in next 7 days`);
+      
+      // CRITICAL: If we have no fixtures for TODAY, force initial fetch (for Oddyssey)
+      if (todayCount === 0) {
+        console.log(`🚨 CRITICAL: No fixtures for TODAY - forcing INITIAL FETCH for Oddyssey`);
+        return true;
+      }
+      
+      // FIXED: Use a more realistic threshold - need at least 100 fixtures across 7 days
+      // This ensures we have enough fixtures for Oddyssey selection (need 10+ per day minimum)
+      const threshold = 100;
+      const needsInitial = fixtureCount < threshold;
+      
+      if (needsInitial) {
+        console.log(`🔄 INITIAL FETCH needed: ${fixtureCount} < ${threshold} fixtures`);
+      } else {
+        console.log(`✅ INCREMENTAL FETCH: ${fixtureCount} >= ${threshold} fixtures available`);
+      }
+      
+      return needsInitial;
+    } catch (error) {
+      console.warn('⚠️ Error checking fixture count, defaulting to initial fetch:', error.message);
+      return true; // Default to initial fetch if check fails
+    }
+  }
+
+  /**
+   * Perform initial 7-day fetch (when starting fresh)
+   */
+  async performInitial7DayFetch() {
+    let totalFixtures = 0;
+    let totalOdds = 0;
+    
+    // Fetch and save ONE DAY AT A TIME to prevent memory issues
+    for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+      try {
+        const currentDate = new Date();
+        currentDate.setDate(currentDate.getDate() + dayOffset);
+        
+        const startDate = new Date(currentDate);
+        startDate.setHours(0, 0, 0, 0);
+        
+        const endDate = new Date(currentDate);
+        endDate.setHours(23, 59, 59, 999);
+        
+        const dateStr = currentDate.toISOString().split('T')[0];
+        console.log(`📅 Fetching fixtures for ${dateStr} (initial fetch)...`);
+        
+        const fixtures = await this.fetchUpcomingFixtures(startDate, endDate);
+        
+        if (fixtures.length === 0) {
+          console.log(`⚠️ No fixtures found for ${dateStr}`);
+          continue;
+        }
+
+        console.log(`📊 Processing ${fixtures.length} fixtures for ${dateStr}...`);
+        const processedFixtures = this.processFixtures(fixtures);
+        
+        if (processedFixtures.length === 0) {
+          console.log(`⚠️ No valid fixtures after processing for ${dateStr}`);
+          continue;
+        }
+
+        console.log(`💾 Saving ${processedFixtures.length} processed fixtures for ${dateStr}...`);
+        const saveResult = await this.saveFixtures(processedFixtures);
+        
+        totalFixtures += saveResult.fixturesInserted || processedFixtures.length;
+        totalOdds += saveResult.oddsInserted || 0;
+        
+        console.log(`✅ Day ${dateStr} completed: ${processedFixtures.length} fixtures saved`);
+        
+        // Small delay between days to prevent API rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+      } catch (dayError) {
+        console.error(`❌ Error fetching day ${dayOffset}:`, dayError.message);
+        // Continue with next day instead of failing completely
+      }
+    }
+
+    console.log(`✅ Initial 7-day fetch completed successfully!`);
+    console.log(`📊 FINAL SUMMARY: ${totalFixtures} fixtures, ${totalOdds} odds saved across 7 days`);
+    return true;
+  }
+
+  /**
+   * Perform incremental fetch (just the next unfetched day)
+   */
+  async performIncrementalFetch() {
+    try {
+      // Find the first day we don't have fixtures for (should be 7 days from today)
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + 7); // Day 8 from today
+      
+      const startDate = new Date(targetDate);
+      startDate.setHours(0, 0, 0, 0);
+      
+      const endDate = new Date(targetDate);
+      endDate.setHours(23, 59, 59, 999);
+      
+      const dateStr = targetDate.toISOString().split('T')[0];
+      console.log(`📅 Incremental fetch for ${dateStr} (day +7)...`);
+      
+      const fixtures = await this.fetchUpcomingFixtures(startDate, endDate);
+      
+      if (fixtures.length === 0) {
+        console.log(`⚠️ No fixtures found for ${dateStr}`);
+        return true;
+      }
+
+      console.log(`📊 Processing ${fixtures.length} fixtures for ${dateStr}...`);
+      const processedFixtures = this.processFixtures(fixtures);
+      
+      if (processedFixtures.length === 0) {
+        console.log(`⚠️ No valid fixtures after processing for ${dateStr}`);
+        return true;
+      }
+
+      console.log(`💾 Saving ${processedFixtures.length} processed fixtures for ${dateStr}...`);
+      const saveResult = await this.saveFixtures(processedFixtures);
+      
+      console.log(`✅ Incremental fetch completed: ${processedFixtures.length} fixtures saved for ${dateStr}`);
+      console.log(`📊 SUMMARY: ${saveResult.fixturesInserted || processedFixtures.length} fixtures, ${saveResult.oddsInserted || 0} odds saved`);
+      
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Error in incremental fetch:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get fixtures for Oddyssey from DATABASE (TODAY ONLY)
+   * OPTIMIZED: No API calls - uses existing 7-day fixture data
+   */
+  async fetchOddysseyFixtures() {
+    try {
+      console.log('🎯 Getting Oddyssey fixtures from DATABASE (TODAY ONLY)...');
+      
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      
+      // Get today's fixtures from database (already fetched by 7-day strategy)
+      const db = require('../db/db');
+      const result = await db.query(`
+        SELECT 
+          f.id,
+          f.name,
+          f.home_team,
+          f.away_team,
+          f.league_id,
+          f.league_name,
+          f.match_date,
+          f.starting_at,
+          f.status,
+          fo.value as odds_data
+        FROM oracle.fixtures f
+        LEFT JOIN oracle.fixture_odds fo ON f.id::VARCHAR = fo.fixture_id
+        WHERE DATE(f.match_date) = $1
+          AND f.status IN ('NS', 'Fixture')
+          AND f.home_team IS NOT NULL 
+          AND f.away_team IS NOT NULL
+          AND f.league_name NOT ILIKE '%women%'
+          AND f.league_name NOT ILIKE '%female%'
+          AND f.league_name NOT ILIKE '%ladies%'
+          AND f.home_team NOT ILIKE '%women%'
+          AND f.away_team NOT ILIKE '%women%'
+          AND f.home_team NOT ILIKE '%female%'
+          AND f.away_team NOT ILIKE '%female%'
+          AND f.home_team NOT ILIKE '%ladies%'
+          AND f.away_team NOT ILIKE '%ladies%'
+        ORDER BY f.match_date ASC
+      `, [todayStr]);
+      
+      if (result.rows.length === 0) {
+        console.log(`⚠️ No fixtures found in database for ${todayStr}`);
+        return [];
+      }
+
+      console.log(`📊 Found ${result.rows.length} fixtures in database for ${todayStr}`);
+      
+      // Convert database rows to processed fixture format
+      const processedFixtures = result.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        participants: [
+          { name: row.home_team, meta: { location: 'home' } },
+          { name: row.away_team, meta: { location: 'away' } }
+        ],
+        league: { 
+          id: row.league_id, 
+          name: row.league_name 
+        },
+        match_date: row.match_date,
+        starting_at: row.starting_at || row.match_date,
+        state: { state: row.status || 'NS' },
+        odds: row.odds_data ? [row.odds_data] : []
+      }));
+
+      console.log(`✅ Oddyssey fixture retrieval completed! Found ${processedFixtures.length} fixtures for TODAY from database`);
+      return processedFixtures;
+      
+    } catch (error) {
+      console.error('❌ Error in fetchOddysseyFixtures:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Refresh fixtures for a specified number of days
+   */
+  async refreshFixtures(days = 7) {
+    try {
+      console.log(`🔄 Starting fixtures refresh for ${days} days...`);
+      
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + days);
+      
+      const fixtures = await this.fetchUpcomingFixtures(startDate, endDate);
+      
+      if (fixtures.length === 0) {
+        console.log('⚠️ No fixtures found for the specified date range');
+        return { fixtures: 0, odds: 0 };
+      }
+
+      console.log(`📊 Processing ${fixtures.length} fixtures...`);
+      const processedFixtures = this.processFixtures(fixtures);
+      
+      if (processedFixtures.length === 0) {
+        console.log('⚠️ No valid fixtures after processing');
+        return { fixtures: 0, odds: 0 };
+      }
+
+      console.log(`💾 Saving ${processedFixtures.length} processed fixtures...`);
+      const saveResult = await this.saveFixtures(processedFixtures);
+      
+      console.log(`✅ Fixture refresh completed successfully!`);
+      return { 
+        fixtures: processedFixtures.length, 
+        odds: saveResult.oddsInserted || processedFixtures.length,
+        leagues: 0 // Leagues are handled separately
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in refreshFixtures:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch leagues with complete data including odds, metadata, CDN info
+   */
+  async fetchLeagues() {
+    console.log('🏆 Fetching leagues with complete data...');
+    
+    if (!this.apiToken) {
+      console.warn('⚠️ SPORTMONKS_API_TOKEN not set. Cannot fetch leagues.');
+      return [];
+    }
+    
+    let allLeagues = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      try {
+        console.log(`📄 Fetching leagues page ${page}...`);
+        
+        // The API endpoint might have changed to include /soccer/ or /football/ prefix
+        const response = await this.axios.get('/leagues', {
+          params: {
+            'api_token': this.apiToken,
+            'include': 'country;seasons',  // Simplify includes to avoid 404
+            'per_page': 50,
+            'page': page
+          }
+        });
+
+        if (!response.data.data || response.data.data.length === 0) {
+          console.log(`📄 No more leagues on page ${page}`);
+          hasMore = false;
+          break;
+        }
+
+        const leagues = response.data.data;
+        console.log(`📊 Fetched ${leagues.length} leagues from page ${page}`);
+
+        for (const league of leagues) {
+          try {
+            const completeLeague = {
+              ...league,
+              odds: league.odds || [],
+              metadata: league.metadata || null,
+              cdn: league.cdn || null,
+              country: league.country || null,
+              seasons: league.seasons || []
+            };
+
+            allLeagues.push(completeLeague);
+          } catch (error) {
+            console.error(`❌ Error processing league ${league.id}:`, error.message);
+          }
+        }
+
+        page++;
+        await new Promise(resolve => setTimeout(resolve, 250));
+        
+      } catch (error) {
+        console.error(`❌ Error fetching leagues page ${page}:`, error.message);
+        hasMore = false;
+      }
+    }
+
+    console.log(`✅ Total leagues fetched: ${allLeagues.length}`);
+    return allLeagues;
+  }
+
+  /**
+   * Save leagues to database with complete data
+   */
+  async saveLeagues(leagues) {
+    let savedCount = 0;
+    
+    for (const league of leagues) {
+      try {
+        // Skip leagues with missing required fields
+        if (!league.id || !league.name) {
+          console.log(`⚠️ Skipping league ${league.id} - missing required fields`);
+          continue;
+        }
+
+        const countryName = league.country?.name || null;
+        const countryCode = league.country?.code || null;
+        const logoUrl = league.cdn?.logo || null;
+        const isPopular = this.isPopularLeague(league);
+
+        const result = await db.query(`
+          INSERT INTO oracle.leagues (
+            league_id, name, country, country_code, logo_url, 
+            season_id, is_popular, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ON CONFLICT (league_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            country = EXCLUDED.country,
+            country_code = EXCLUDED.country_code,
+            logo_url = EXCLUDED.logo_url,
+            season_id = EXCLUDED.season_id,
+            is_popular = EXCLUDED.is_popular,
+            updated_at = NOW()
+        `, [
+          league.id,
+          league.name,
+          countryName,
+          countryCode,
+          logoUrl,
+          league.season_id || null,
+          isPopular,
+          new Date(),
+          new Date()
+        ]);
+        
+        savedCount++;
+        console.log(`✅ Saved league ${league.id}: ${league.name}`);
+      } catch (error) {
+        console.error(`❌ Error saving league ${league.id}:`, error.message);
+      }
+    }
+    
+    console.log(`✅ Saved ${savedCount} leagues to database`);
+  }
+
+  /**
+   * Determine if a league is popular based on name and country
+   */
+  isPopularLeague(league) {
+    const popularKeywords = [
+      'premier league', 'la liga', 'bundesliga', 'serie a', 'ligue 1',
+      'champions league', 'europa league', 'conference league',
+      'fa cup', 'copa del rey', 'dfb pokal', 'coppa italia', 'coupe de france'
+    ];
+    
+    const leagueName = league.name?.toLowerCase() || '';
+    const countryName = league.country?.name?.toLowerCase() || '';
+    
+    return popularKeywords.some(keyword => 
+      leagueName.includes(keyword) || countryName.includes(keyword)
+    );
+  }
+
+  /**
+   * Fetch and save leagues with complete data
+   */
+  async fetchAndSaveLeagues() {
+    try {
+      console.log('🏆 Starting league fetch and save process...');
+      
+      const leagues = await this.fetchLeagues();
+      
+      if (leagues.length === 0) {
+        console.log('⚠️ No leagues found');
+        return;
+      }
+
+      console.log(`💾 Saving ${leagues.length} leagues...`);
+      await this.saveLeagues(leagues);
+      
+      console.log(`✅ League fetch and save completed successfully!`);
+      
+    } catch (error) {
+      console.error('❌ Error in fetchAndSaveLeagues:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch leagues for specific countries
+   */
+  async fetchLeaguesByCountry(countryIds) {
+    console.log(`🏆 Fetching leagues for countries: ${countryIds.join(', ')}...`);
+    
+    if (!this.apiToken) {
+      console.warn('⚠️ SPORTMONKS_API_TOKEN not set. Cannot fetch leagues.');
+      return [];
+    }
+    
+    let allLeagues = [];
+    
+    for (const countryId of countryIds) {
+      try {
+        console.log(`📄 Fetching leagues for country ${countryId}...`);
+        
+        const response = await this.axios.get(`/leagues/countries/${countryId}`, {
+          params: {
+            'api_token': this.apiToken,
+            'include': 'country;seasons;odds.bookmaker;metadata;cdn'
+          }
+        });
+
+        if (response.data.data && response.data.data.length > 0) {
+          const leagues = response.data.data;
+          console.log(`📊 Fetched ${leagues.length} leagues for country ${countryId}`);
+
+          for (const league of leagues) {
+            try {
+              const completeLeague = {
+                ...league,
+                odds: league.odds || [],
+                metadata: league.metadata || null,
+                cdn: league.cdn || null,
+                country: league.country || null,
+                seasons: league.seasons || []
+              };
+
+              allLeagues.push(completeLeague);
+            } catch (error) {
+              console.error(`❌ Error processing league ${league.id}:`, error.message);
+            }
+          }
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 250));
+        
+      } catch (error) {
+        console.error(`❌ Error fetching leagues for country ${countryId}:`, error.message);
+      }
+    }
+
+    console.log(`✅ Total leagues fetched for specified countries: ${allLeagues.length}`);
+    return allLeagues;
+  }
+}
+
+module.exports = SportMonksService; 

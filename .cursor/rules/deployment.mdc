@@ -1,0 +1,27 @@
+Rule 1: Environment Management
+- Use separate environment configurations for development, staging, and production
+- Store sensitive data in environment variables
+- Use .env files for local development
+- Never commit sensitive data to version control
+
+Rule 2: Database Deployment
+- Always backup database before major changes
+- Use migration scripts for schema changes
+- Test migrations on staging environment first
+- Monitor database performance in production
+
+Rule 3: Smart Contract Deployment
+- Deploy contracts to testnet first
+- Verify contracts on blockchain explorers
+- Update contract addresses in configuration
+- Monitor contract events and transactions
+
+Rule 4: Service Monitoring
+- Implement health checks for all services
+- Monitor API response times and error rates
+- Set up alerts for critical failures
+- Maintain comprehensive logging for debugging
+description:
+globs:
+alwaysApply: false
+---

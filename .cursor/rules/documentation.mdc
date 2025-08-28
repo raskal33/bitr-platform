@@ -1,0 +1,27 @@
+Rule 1: Code Documentation
+- Add JSDoc comments for all functions and classes
+- Document complex business logic with inline comments
+- Maintain README files for each major component
+- Keep API documentation up to date
+
+Rule 2: Technical Documentation
+- Document system architecture and data flow
+- Maintain deployment guides and setup instructions
+- Keep troubleshooting guides current
+- Document configuration options and environment variables
+
+Rule 3: User Documentation
+- Provide clear user guides for platform features
+- Document API endpoints with examples
+- Maintain FAQ sections for common issues
+- Keep documentation synchronized with code changes
+
+Rule 4: Documentation Maintenance
+- Review and update documentation regularly
+- Use version control for documentation changes
+- Implement documentation testing where possible
+- Solicit feedback on documentation clarity
+description:
+globs:
+alwaysApply: false
+---

@@ -1,0 +1,45 @@
+{
+  "critical_fields": {
+    "fixture": {
+      "ids": "All IDs must be VARCHAR(50) - SportMonks uses string IDs",
+      "image_paths": [
+        "participants[].image_path - Team logos",
+        "venue.image_path - Venue images",
+        "league.image_path - League emblems",
+        "referees[].image_path - Referee photos"
+      ],
+      "metadata": {
+        "venue": "Complete venue object with capacity, coordinates, surface",
+        "referee": "Complete referee data with personal info",
+        "participants_meta": "participants[].meta.location determines home/away",
+        "state": "state.state shows match status (NS, FT, HT, etc.)",
+        "timestamps": "Multiple timestamp formats provided"
+      }
+    },
+    "odds": {
+      "structure": "odds[] array with market_id determining bet type",
+      "markets": {
+        "1": "1X2 (Full Time Result)",
+        "2": "Over/Under 2.5",
+        "3": "Both Teams To Score",
+        "4": "Half Time Result"
+      },
+      "critical_fields": [
+        "market_id - Determines bet type",
+        "label - Specific outcome (1,X,2,Over,Under,Yes,No)",
+        "value - Decimal odds",
+        "probability - Implied probability",
+        "bookmaker - Complete bookmaker info with logo"
+      ]
+    },
+    "results": {
+      "evaluation_needed": [
+        "result_1x2 - Calculated from scores",
+        "result_ou25 - Over/Under 2.5 evaluation",
+        "result_btts - Both teams scored evaluation",
+        "result_ht - Half time result",
+        "outcome_final - Final outcome for each market"
+      ]
+    }
+  }
+}

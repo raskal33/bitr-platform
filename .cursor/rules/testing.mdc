@@ -1,0 +1,27 @@
+Rule 1: Testing Strategy
+- Write unit tests for all critical functions
+- Implement integration tests for API endpoints
+- Use contract testing for smart contract functionality
+- Maintain high test coverage for core business logic
+
+Rule 2: Test Data Management
+- Use fixtures for consistent test data
+- Implement database seeding for testing
+- Clean up test data after each test run
+- Use separate test database environment
+
+Rule 3: Automated Testing
+- Run tests automatically on code changes
+- Implement CI/CD pipeline for testing
+- Use linting and code quality checks
+- Monitor test results and coverage reports
+
+Rule 4: Manual Testing
+- Test all user flows manually before deployment
+- Verify blockchain interactions work correctly
+- Test error scenarios and edge cases
+- Validate API responses and data integrity
+description:
+globs:
+alwaysApply: false
+---

@@ -1,0 +1,147 @@
+{
+  "data": [
+    {
+      "id": "18535517",
+      "name": "Arsenal vs Manchester United",
+      "state": {
+        "state": "NS",
+        "started_at": "2025-01-16T20:00:00Z"
+      },
+      "starting_at": "2025-01-16T20:00:00Z",
+      "result_info": null,
+      "length": 90,
+      "placeholder": false,
+      "has_odds": true,
+      "has_premium_odds": true,
+      "starting_at_timestamp": 1705435200,
+      "participants": [
+        {
+          "id": "1",
+          "sport_id": "1",
+          "country_id": "2",
+          "venue_id": "214",
+          "gender": "male",
+          "name": "Arsenal",
+          "short_code": "ARS",
+          "image_path": "https://cdn.sportmonks.com/images/soccer/teams/1/1.png",
+          "founded": 1886,
+          "type": "domestic",
+          "placeholder": false,
+          "last_played_at": "2025-01-12T15:00:00Z",
+          "meta": {
+            "location": "home",
+            "winner": null,
+            "position": null
+          }
+        }
+      ],
+      "venue": {
+        "id": "214",
+        "country_id": "2",
+        "city_id": "1204",
+        "name": "Emirates Stadium",
+        "address": "Hornsey Road, London",
+        "city": "London",
+        "capacity": 60260,
+        "image_path": "https://cdn.sportmonks.com/images/soccer/venues/214.png",
+        "coordinates": "51.5549,-0.1084",
+        "surface": "grass"
+      },
+      "league": {
+        "id": "8",
+        "sport_id": "1",
+        "country_id": "2",
+        "name": "Premier League",
+        "active": true,
+        "short_code": "EPL",
+        "image_path": "https://cdn.sportmonks.com/images/soccer/leagues/8.png",
+        "type": "league",
+        "sub_type": "domestic",
+        "last_played_at": "2025-01-15T20:00:00Z"
+      },
+      "season": {
+        "id": "23",
+        "sport_id": "1",
+        "league_id": "8",
+        "name": "2024/2025",
+        "finished": false,
+        "pending": false,
+        "is_current": true,
+        "starting_at": "2024-08-17",
+        "ending_at": "2025-05-25",
+        "standings_recalculated_at": "2025-01-15T22:00:00Z"
+      },
+      "round": {
+        "id": "23456",
+        "sport_id": "1",
+        "league_id": "8",
+        "season_id": "23",
+        "stage_id": "87",
+        "name": "21",
+        "finished": false,
+        "is_current": true,
+        "starting_at": "2025-01-16",
+        "ending_at": "2025-01-19"
+      },
+      "stage": {
+        "id": "87",
+        "sport_id": "1",
+        "league_id": "8",
+        "season_id": "23",
+        "type_id": "1",
+        "name": "Regular Season",
+        "sort_order": 1,
+        "finished": false,
+        "is_current": true,
+        "starting_at": "2024-08-17",
+        "ending_at": "2025-05-25"
+      },
+      "referees": [
+        {
+          "id": "12345",
+          "sport_id": "1",
+          "country_id": "2",
+          "city_id": "1204",
+          "common_name": "Michael Oliver",
+          "firstname": "Michael",
+          "lastname": "Oliver",
+          "name": "Michael Oliver",
+          "display_name": "M. Oliver",
+          "image_path": "https://cdn.sportmonks.com/images/soccer/referees/12345.png",
+          "height": 183,
+          "weight": 75,
+          "date_of_birth": "1985-02-20",
+          "gender": "male"
+        }
+      ],
+      "odds": [
+        {
+          "id": "12345678",
+          "fixture_id": "18535517",
+          "market_id": "1",
+          "bookmaker_id": "2",
+          "label": "1",
+          "value": "2.10",
+          "name": "Arsenal",
+          "sort_order": 1,
+          "market_description": "Full Time Result",
+          "probability": "47.62",
+          "dp3": "2.100",
+          "fractional": "11/10",
+          "american": "+110",
+          "winning": null,
+          "stopped": false,
+          "total": null,
+          "handicap": null,
+          "participants": "1",
+          "latest_bookmaker_update": "2025-01-16T10:30:00Z",
+          "bookmaker": {
+            "id": "2",
+            "name": "Bet365",
+            "logo": "https://cdn.sportmonks.com/images/bookmakers/2.png"
+          }
+        }
+      ]
+    }
+  ]
+}

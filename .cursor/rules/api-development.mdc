@@ -1,0 +1,27 @@
+Rule 1: API Endpoint Organization
+- Group related endpoints under logical routes
+- Use RESTful conventions for endpoint naming
+- Implement proper HTTP status codes
+- Add comprehensive API documentation
+
+Rule 2: Data Validation
+- Validate all request parameters and body data
+- Use middleware for common validation patterns
+- Implement input sanitization to prevent injection attacks
+- Return clear validation error messages
+
+Rule 3: Database Integration
+- Use prepared statements for all database queries
+- Implement proper transaction handling
+- Use connection pooling for better performance
+- Handle database connection errors gracefully
+
+Rule 4: External API Integration
+- Implement retry logic for external API calls
+- Use caching to reduce API rate limits
+- Handle API failures gracefully with fallbacks
+- Monitor external API response times and errors
+description:
+globs:
+alwaysApply: false
+---

@@ -1,0 +1,27 @@
+Rule 1: Code Organization
+- Keep backend services modular and well-documented
+- Use consistent naming conventions across all components
+- Separate concerns: API, indexers, oracle services, database
+- Maintain clear separation between blockchain and backend logic
+
+Rule 2: Error Handling
+- Implement comprehensive error handling in all API endpoints
+- Use try-catch blocks for database operations
+- Log errors appropriately for debugging
+- Provide meaningful error messages to users
+
+Rule 3: Performance Optimization
+- Use database indexes for frequently queried columns
+- Implement caching strategies for external API calls
+- Optimize blockchain event indexing with proper filtering
+- Use connection pooling for database connections
+
+Rule 4: Security Best Practices
+- Never expose private keys in code or logs
+- Validate all user inputs and API parameters
+- Use environment variables for sensitive configuration
+- Implement rate limiting on API endpoints
+description:
+globs:
+alwaysApply: false
+---

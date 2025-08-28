@@ -1,0 +1,43 @@
+{
+  "critical_missing_fields": {
+    "fixtures_table": [
+      "referee_id VARCHAR(50)",
+      "referee_name VARCHAR(255)",
+      "referee_image_path TEXT",
+      "venue_capacity INTEGER",
+      "venue_coordinates VARCHAR(100)",
+      "venue_surface VARCHAR(50)",
+      "venue_image_path TEXT",
+      "home_team_image_path TEXT",
+      "away_team_image_path TEXT",
+      "league_image_path TEXT",
+      "country_image_path TEXT"
+    ],
+    "odds_table": [
+      "bookmaker_name VARCHAR(100)",
+      "bookmaker_logo TEXT",
+      "probability VARCHAR(20)",
+      "fractional VARCHAR(20)",
+      "american VARCHAR(20)"
+    ],
+    "results_evaluation": [
+      "evaluation_status VARCHAR(20)",
+      "evaluation_timestamp TIMESTAMP WITH TIME ZONE",
+      "evaluator VARCHAR(50)",
+      "confidence_score NUMERIC(5,2)"
+    ],
+    "new_tables_needed": [
+      "oracle.referees - Referee master data",
+      "oracle.venues - Venue master data",
+      "oracle.bookmakers - Bookmaker master data",
+      "oracle.countries - Country master data with flags"
+    ]
+  },
+  "coinpaprika_images": {
+    "required_fields": [
+      "logo_url TEXT - Coin logo from Coinpaprika",
+      "whitepaper_url TEXT - Project whitepaper",
+      "website_url TEXT - Official website"
+    ]
+  }
+}

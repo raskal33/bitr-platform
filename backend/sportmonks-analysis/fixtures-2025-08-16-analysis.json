@@ -1,0 +1,648 @@
+{
+  "total_fixtures": 314,
+  "fixtures_with_odds": 169,
+  "fixtures_without_odds": 145,
+  "leagues": [
+    "Liga Profesional de Fútbol",
+    "Brasileiro Women",
+    "Liga MX",
+    "J-League",
+    "FNL",
+    "K League 1",
+    "Premier League",
+    "Super League",
+    "DFB Pokal",
+    "First Division",
+    "V-League",
+    "FA Cup",
+    "Championship",
+    "League One",
+    "League Two",
+    "Enterprise National League",
+    "Ligue 2",
+    "Ekstraklasa",
+    "Allsvenskan",
+    "1. Lig",
+    "Pro League",
+    "Challenger Pro League",
+    "Uae League",
+    "Eerste Divisie",
+    "Liga Portugal",
+    "Ligue 1",
+    "Admiral Bundesliga",
+    "Chance Liga",
+    "La Liga 2",
+    "Stars League",
+    "Veikkausliiga",
+    "First League",
+    "Super Lig",
+    "Coppa Italia",
+    "1. HNL",
+    "Eredivisie",
+    "La Liga",
+    "Canadian Soccer League",
+    "Liga 1",
+    "Club Friendlies 1",
+    "Serie A",
+    "Serie B",
+    "Major League Soccer"
+  ],
+  "bookmakers": [
+    "bet365",
+    "Marathonbet",
+    "10Bet",
+    "Dafabet",
+    "Sbo",
+    "Unibet",
+    "1xbet",
+    "Pinnacle",
+    "888Sport",
+    "WilliamHill",
+    "Tipico",
+    "CloudBet",
+    "MansionBet",
+    "bwin",
+    "Ladbrokes",
+    "188Bet",
+    "MelBet",
+    "HKJC",
+    "Betfair",
+    "Interwetten"
+  ],
+  "odds_markets": [
+    "Team Goalscorer",
+    "Time of 1st Team Goal",
+    "Corners Race",
+    "Corner Handicap",
+    "Asian Handicap",
+    "Away Team Highest Scoring Half",
+    "Correct Score",
+    "Player Shots",
+    "Corners Over Under",
+    "Team Shots on Target",
+    "Alternative Asian Handicap",
+    "Early Goal",
+    "Match Winner",
+    "Total - Away",
+    "2nd Half Winner",
+    "Half Time Correct Score",
+    "Alternative 1st Half Handicap Result",
+    "Multi Scorers",
+    "Player Shots On Target",
+    "Goals Over/Under 2nd Half",
+    "First Team to Score",
+    "Home/Away",
+    "2nd Half Goals",
+    "1st Half Winner",
+    "Both Teams to Score in 1st Half",
+    "Time of First Goal Brackets",
+    "1st Half Exact Goals Number",
+    "Total Goal Minutes",
+    "Alternative Corners",
+    "Goals Over/Under 1st Half",
+    "Goals Over/Under",
+    "Both Teams To Score",
+    "Half Time/Full Time",
+    "Goalscorers",
+    "Asian Handicap First Half",
+    "Handicap Result",
+    "Goals Odd/Even",
+    "Team Cards",
+    "Total - Home",
+    "Both Teams to Score",
+    "Away Team Score a Goal",
+    "Both Teams To Score - 2nd Half",
+    "Odd/Even 1st Half",
+    "Team Shots",
+    "Odd/Even",
+    "1st Half Goal Line",
+    "Alternative 1st Half Asian Handicap",
+    "Alternative 1st Half Goal Line",
+    "Result / Total Goals",
+    "Specials",
+    "Fulltime Result",
+    "Goal Line",
+    "Alternative Handicap Result",
+    "Corners 1x2",
+    "Clean Sheet",
+    "Winning Margin",
+    "Alternative Goal Line",
+    "Double Chance - 2nd Half",
+    "Corners Asian Handicap",
+    "Highest Scoring Half",
+    "Alternative Total Goals",
+    "Exact Goals Number",
+    "Team To Score First",
+    "Odd/Even (2nd Half)",
+    "2nd Half Exact Goals Number",
+    "Win to Nil - Away",
+    "Asian Handicap Cards",
+    "Number of Cards In Match",
+    "Last Match Corner",
+    "Half With Most Goals",
+    "Home Team Highest Scoring Half",
+    "Team Total Goals",
+    "Full Time Result – Enhanced Prices",
+    "Home Team Odd/Even Goals",
+    "Win Both Halves",
+    "HT/FT Double",
+    "10 Minute Result",
+    "Multicorners",
+    "Teams to Score",
+    "Both Teams to Score in 2nd Half",
+    "Both Teams to Score 1st Half - 2nd Half",
+    "First Half Goals",
+    "First Goal Method",
+    "Half Time Result / Total Goals",
+    "To Score a Penalty",
+    "To Miss a Penalty",
+    "Match Shots on Target",
+    "Match Shots",
+    "1st Half Asian Corners",
+    "Late Goal",
+    "Draw No Bet",
+    "1st Half Handicap",
+    "Result/Total Goals",
+    "Both Teams To Score - 1st Half",
+    "Asian Total Cards",
+    "Half Time Result",
+    "Corners",
+    "Away Team Exact Goals Number",
+    "1st Half Asian Handicap",
+    "Own Goal",
+    "Away Odd/Even",
+    "Double Chance - 1st Half",
+    "Home Team Exact Goals Number",
+    "Results/Both Teams To Score",
+    "Total Corners",
+    "2nd Half Goals Odd/Even",
+    "Double Chance",
+    "First 10 min Winner",
+    "Exact Total Goals",
+    "Team To Score Last",
+    "Cards Asian Handicap",
+    "Home Odd/Even",
+    "Corner Match Bet",
+    "To Win Either Half",
+    "Cards Over/Under",
+    "Total Goals/Both Teams To Score",
+    "Asian Handicap Corners",
+    "Asian Total Corners",
+    "Corners 2-Way",
+    "First Half Corners",
+    "Time of First Corner",
+    "Team Corners",
+    "Total Goals/Both Teams to Score",
+    "Number of Goals In Match",
+    "Home Team Exact Goals",
+    "Away Team Exact Goals",
+    "Away Team Odd/Even Goals",
+    "Last Team to Score",
+    "Half Time Double Chance",
+    "To Score In Half",
+    "2nd Half Result",
+    "Full Time Result",
+    "Result/Both Teams to Score",
+    "Home Team Score a Goal",
+    "Clean Sheet - Home",
+    "Clean Sheet - Away",
+    "Win To Nil",
+    "Home win both halves",
+    "Player Cards",
+    "Away win both halves",
+    "Player Passes",
+    "Team Tackles",
+    "Match Tackles",
+    "Player Shots Over/Under",
+    "Player Shots On Target Over/Under",
+    "A Penalty in the Match",
+    "Match Offsides",
+    "Team Offsides",
+    "To Qualify"
+  ],
+  "sample_fixtures": [
+    {
+      "id": 19362150,
+      "name": "Racing Club vs Tigre",
+      "league": "Liga Profesional de Fútbol",
+      "participants": [
+        {
+          "id": 3608,
+          "name": "Racing Club",
+          "location": "home"
+        },
+        {
+          "id": 9884,
+          "name": "Tigre",
+          "location": "away"
+        }
+      ],
+      "odds_count": 3152,
+      "has_odds": true,
+      "starting_at": "2025-08-16 00:00:00"
+    },
+    {
+      "id": 19533210,
+      "name": "Corinthians W vs Bahia W",
+      "league": "Brasileiro Women",
+      "participants": [
+        {
+          "id": 236273,
+          "name": "Corinthians W",
+          "location": "home"
+        },
+        {
+          "id": 254142,
+          "name": "Bahia W",
+          "location": "away"
+        }
+      ],
+      "odds_count": 0,
+      "has_odds": false,
+      "starting_at": "2025-08-16 00:00:00"
+    },
+    {
+      "id": 19425906,
+      "name": "Puebla vs Atlético San Luis",
+      "league": "Liga MX",
+      "participants": [
+        {
+          "id": 15522,
+          "name": "Atlético San Luis",
+          "location": "away"
+        },
+        {
+          "id": 3849,
+          "name": "Puebla",
+          "location": "home"
+        }
+      ],
+      "odds_count": 3213,
+      "has_odds": true,
+      "starting_at": "2025-08-16 01:00:00"
+    },
+    {
+      "id": 19425907,
+      "name": "Necaxa vs León",
+      "league": "Liga MX",
+      "participants": [
+        {
+          "id": 10836,
+          "name": "León",
+          "location": "away"
+        },
+        {
+          "id": 3951,
+          "name": "Necaxa",
+          "location": "home"
+        }
+      ],
+      "odds_count": 3294,
+      "has_odds": true,
+      "starting_at": "2025-08-16 03:05:00"
+    },
+    {
+      "id": 19348582,
+      "name": "Kashima Antlers vs Avispa Fukuoka",
+      "league": "J-League",
+      "participants": [
+        {
+          "id": 3690,
+          "name": "Kashima Antlers",
+          "location": "home"
+        },
+        {
+          "id": 2882,
+          "name": "Avispa Fukuoka",
+          "location": "away"
+        }
+      ],
+      "odds_count": 2937,
+      "has_odds": true,
+      "starting_at": "2025-08-16 09:00:00"
+    },
+    {
+      "id": 19348587,
+      "name": "Shimizu S-Pulse vs Yokohama F. Marinos",
+      "league": "J-League",
+      "participants": [
+        {
+          "id": 3663,
+          "name": "Shimizu S-Pulse",
+          "location": "home"
+        },
+        {
+          "id": 2756,
+          "name": "Yokohama F. Marinos",
+          "location": "away"
+        }
+      ],
+      "odds_count": 2985,
+      "has_odds": true,
+      "starting_at": "2025-08-16 09:30:00"
+    },
+    {
+      "id": 19479151,
+      "name": "Thép Xanh Nam Định vs Hải Phòng",
+      "league": "V-League",
+      "participants": [
+        {
+          "id": 18518,
+          "name": "Thép Xanh Nam Định",
+          "location": "home"
+        },
+        {
+          "id": 15046,
+          "name": "Hải Phòng",
+          "location": "away"
+        }
+      ],
+      "odds_count": 0,
+      "has_odds": false,
+      "starting_at": "2025-08-16 11:00:00"
+    },
+    {
+      "id": 19515654,
+      "name": "Jersey Bulls vs Fisher",
+      "league": "FA Cup",
+      "participants": [
+        {
+          "id": 19821,
+          "name": "Fisher",
+          "location": "away"
+        },
+        {
+          "id": 256766,
+          "name": "Jersey Bulls",
+          "location": "home"
+        }
+      ],
+      "odds_count": 0,
+      "has_odds": false,
+      "starting_at": "2025-08-16 11:00:00"
+    },
+    {
+      "id": 19479148,
+      "name": "Công an TP.Hồ Chí Minh vs Hà Nội",
+      "league": "V-League",
+      "participants": [
+        {
+          "id": 6334,
+          "name": "Hà Nội",
+          "location": "away"
+        },
+        {
+          "id": 13369,
+          "name": "Công an TP.Hồ Chí Minh",
+          "location": "home"
+        }
+      ],
+      "odds_count": 0,
+      "has_odds": false,
+      "starting_at": "2025-08-16 12:15:00"
+    },
+    {
+      "id": 19448482,
+      "name": "KV Kortrijk vs Koninklijke Lierse Sportkring",
+      "league": "Challenger Pro League",
+      "participants": [
+        {
+          "id": 1130,
+          "name": "KV Kortrijk",
+          "location": "home"
+        },
+        {
+          "id": 227972,
+          "name": "Koninklijke Lierse Sportkring",
+          "location": "away"
+        }
+      ],
+      "odds_count": 0,
+      "has_odds": false,
+      "starting_at": "2025-08-16 14:00:00"
+    }
+  ],
+  "fixtures_by_league": {
+    "Liga Profesional de Fútbol": {
+      "total": 5,
+      "with_odds": 5,
+      "without_odds": 0
+    },
+    "Brasileiro Women": {
+      "total": 2,
+      "with_odds": 0,
+      "without_odds": 2
+    },
+    "Liga MX": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "J-League": {
+      "total": 9,
+      "with_odds": 9,
+      "without_odds": 0
+    },
+    "FNL": {
+      "total": 4,
+      "with_odds": 4,
+      "without_odds": 0
+    },
+    "K League 1": {
+      "total": 2,
+      "with_odds": 2,
+      "without_odds": 0
+    },
+    "Premier League": {
+      "total": 14,
+      "with_odds": 12,
+      "without_odds": 2
+    },
+    "Super League": {
+      "total": 6,
+      "with_odds": 6,
+      "without_odds": 0
+    },
+    "DFB Pokal": {
+      "total": 11,
+      "with_odds": 11,
+      "without_odds": 0
+    },
+    "First Division": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "V-League": {
+      "total": 2,
+      "with_odds": 0,
+      "without_odds": 2
+    },
+    "FA Cup": {
+      "total": 126,
+      "with_odds": 0,
+      "without_odds": 126
+    },
+    "Championship": {
+      "total": 10,
+      "with_odds": 10,
+      "without_odds": 0
+    },
+    "League One": {
+      "total": 12,
+      "with_odds": 12,
+      "without_odds": 0
+    },
+    "League Two": {
+      "total": 12,
+      "with_odds": 12,
+      "without_odds": 0
+    },
+    "Enterprise National League": {
+      "total": 12,
+      "with_odds": 11,
+      "without_odds": 1
+    },
+    "Ligue 2": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Ekstraklasa": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Allsvenskan": {
+      "total": 2,
+      "with_odds": 2,
+      "without_odds": 0
+    },
+    "1. Lig": {
+      "total": 4,
+      "with_odds": 4,
+      "without_odds": 0
+    },
+    "Pro League": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Challenger Pro League": {
+      "total": 5,
+      "with_odds": 0,
+      "without_odds": 5
+    },
+    "Uae League": {
+      "total": 4,
+      "with_odds": 0,
+      "without_odds": 4
+    },
+    "Eerste Divisie": {
+      "total": 1,
+      "with_odds": 1,
+      "without_odds": 0
+    },
+    "Liga Portugal": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Ligue 1": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Admiral Bundesliga": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Chance Liga": {
+      "total": 5,
+      "with_odds": 5,
+      "without_odds": 0
+    },
+    "La Liga 2": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Stars League": {
+      "total": 2,
+      "with_odds": 1,
+      "without_odds": 1
+    },
+    "Veikkausliiga": {
+      "total": 1,
+      "with_odds": 1,
+      "without_odds": 0
+    },
+    "First League": {
+      "total": 2,
+      "with_odds": 2,
+      "without_odds": 0
+    },
+    "Super Lig": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Coppa Italia": {
+      "total": 4,
+      "with_odds": 4,
+      "without_odds": 0
+    },
+    "1. HNL": {
+      "total": 2,
+      "with_odds": 2,
+      "without_odds": 0
+    },
+    "Eredivisie": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "La Liga": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Canadian Soccer League": {
+      "total": 2,
+      "with_odds": 0,
+      "without_odds": 2
+    },
+    "Liga 1": {
+      "total": 1,
+      "with_odds": 1,
+      "without_odds": 0
+    },
+    "Club Friendlies 1": {
+      "total": 2,
+      "with_odds": 2,
+      "without_odds": 0
+    },
+    "Serie A": {
+      "total": 4,
+      "with_odds": 4,
+      "without_odds": 0
+    },
+    "Serie B": {
+      "total": 3,
+      "with_odds": 3,
+      "without_odds": 0
+    },
+    "Major League Soccer": {
+      "total": 7,
+      "with_odds": 7,
+      "without_odds": 0
+    }
+  },
+  "odds_statistics": {
+    "min_odds_count": 3,
+    "max_odds_count": 3348,
+    "total_odds": 359730,
+    "avg_odds_per_fixture": 2128.579881656805
+  }
+}

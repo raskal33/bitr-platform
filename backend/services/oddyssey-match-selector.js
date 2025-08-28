@@ -947,11 +947,32 @@ class OddysseyMatchSelector {
           f.league_name,
           f.match_date,
           f.status,
-          fr.home_score,
-          fr.away_score,
-          fr.outcome_1x2,
-          fr.outcome_ou25,
-          fr.finished_at,
+          fr.home_score as home_score,
+          fr.away_score as away_score,
+          COALESCE(fr.outcome_1x2, 
+            CASE 
+              WHEN fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL THEN
+                CASE 
+                  WHEN fr.home_score > fr.away_score THEN '1'
+                  WHEN fr.home_score = fr.away_score THEN 'X'
+                  WHEN fr.home_score < fr.away_score THEN '2'
+                  ELSE NULL
+                END
+              ELSE NULL
+            END
+          ) as outcome_1x2,
+          COALESCE(fr.outcome_ou25,
+            CASE 
+              WHEN fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL THEN
+                CASE 
+                  WHEN (fr.home_score + fr.away_score) > 2.5 THEN 'over'
+                  WHEN (fr.home_score + fr.away_score) < 2.5 THEN 'under'
+                  ELSE NULL
+                END
+              ELSE NULL
+            END
+          ) as outcome_ou25,
+          COALESCE(fr.finished_at, f.updated_at) as finished_at,
           CASE 
             WHEN f.status IN ('FT', 'AET', 'PEN') THEN 'finished'
             WHEN f.status IN ('1H', '2H', 'HT') THEN 'live'

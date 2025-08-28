@@ -1,0 +1,193 @@
+const { ethers } = require('ethers');
+const config = require('./config');
+const db = require('./db/db');
+
+async function manualIndexMissingSlip() {
+  console.log('🔍 Manually Indexing Missing Slip...');
+  
+  // Transaction details from user
+  const txHash = '0x95cabcd5bd75eb8b0d9d390f736d24ff74d56bc0e11320e7439f5b02cf835b62';
+  const playerAddress = '0xA336C7B8cBe75D5787F25A62FE282B83Ac0f3363';
+  
+  try {
+    // Initialize provider and contract
+    const provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
+    
+    // Load Oddyssey ABI
+    let OddysseyABI;
+    try {
+      OddysseyABI = require('../solidity/artifacts/contracts/Oddyssey.sol/Oddyssey.json').abi;
+    } catch (error) {
+      console.log('⚠️ Using fallback ABI');
+      OddysseyABI = [
+        "event SlipPlaced(uint256 indexed cycleId, address indexed player, uint256 indexed slipId)",
+        "function getSlip(uint256 slipId) external view returns (address player, uint256 cycleId, uint256 placedAt, tuple(uint256 matchId, uint8 betType, bytes32 selection, uint32 selectedOdd)[] predictions, uint256 finalScore, uint8 correctCount, bool isEvaluated)",
+        "function slipCount() external view returns (uint256)"
+      ];
+    }
+    
+    const oddysseyContract = new ethers.Contract(config.blockchain.contractAddresses.oddyssey, OddysseyABI, provider);
+    
+    console.log(`🔍 Analyzing transaction: ${txHash}`);
+    
+    // Get transaction receipt
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) {
+      throw new Error('Transaction not found');
+    }
+    
+    console.log(`✅ Transaction found in block: ${receipt.blockNumber}`);
+    console.log(`✅ Status: ${receipt.status === 1 ? 'Success' : 'Failed'}`);
+    console.log(`✅ Logs count: ${receipt.logs.length}`);
+    
+    // Find SlipPlaced events in the transaction
+    const slipEvents = [];
+    for (const log of receipt.logs) {
+      try {
+        const parsed = oddysseyContract.interface.parseLog(log);
+        if (parsed && parsed.name === 'SlipPlaced') {
+          const { cycleId, player, slipId } = parsed.args;
+          slipEvents.push({ cycleId, player, slipId, log });
+        }
+      } catch (error) {
+        // Skip logs that can't be parsed
+      }
+    }
+    
+    if (slipEvents.length === 0) {
+      console.log('❌ No SlipPlaced events found in this transaction');
+      return;
+    }
+    
+    console.log(`✅ Found ${slipEvents.length} SlipPlaced events`);
+    
+    // Process each slip event
+    for (const event of slipEvents) {
+      const { cycleId, player, slipId } = event;
+      
+      console.log(`\n📝 Processing slip ${slipId} for player ${player} in cycle ${cycleId}`);
+      
+      // Check if slip already exists
+      const existingSlip = await db.query(
+        'SELECT slip_id FROM oracle.oddyssey_slips WHERE slip_id = $1',
+        [slipId.toString()]
+      );
+      
+      if (existingSlip.rows.length > 0) {
+        console.log(`   ⚠️ Slip ${slipId} already exists in database`);
+        continue;
+      }
+      
+      // Get slip data from contract
+      let slipData;
+      try {
+        slipData = await oddysseyContract.getSlip(slipId);
+        console.log(`   ✅ Retrieved slip data from contract`);
+        
+        // Convert BigInt values to strings for JSON serialization
+        if (slipData && Array.isArray(slipData)) {
+          console.log(`   📊 Raw slip data:`, JSON.stringify(slipData, (key, value) => 
+            typeof value === 'bigint' ? value.toString() : value, 2));
+          
+          // slipData is an array: [player, cycleId, placedAt, predictions, finalScore, correctCount, isEvaluated]
+          const predictions = slipData[3]; // predictions array
+          const formattedPredictions = predictions.map(pred => ({
+            matchId: pred[0].toString(),
+            betType: pred[1].toString(),
+            selection: pred[2],
+            selectedOdd: pred[3].toString()
+          }));
+          
+          slipData = {
+            player: slipData[0],
+            cycleId: slipData[1].toString(),
+            placedAt: slipData[2].toString(),
+            predictions: formattedPredictions,
+            finalScore: slipData[4].toString(),
+            correctCount: slipData[5].toString(),
+            isEvaluated: slipData[6]
+          };
+        }
+      } catch (error) {
+        console.log(`   ⚠️ Could not get slip data from contract: ${error.message}`);
+        slipData = null;
+      }
+      
+      // Get block data for timestamp
+      const block = await provider.getBlock(receipt.blockNumber);
+      
+      // Insert slip into database
+      try {
+        await db.query(`
+          INSERT INTO oracle.oddyssey_slips (
+            slip_id, 
+            cycle_id, 
+            player_address, 
+            placed_at, 
+            predictions,
+            final_score,
+            correct_count,
+            is_evaluated,
+            tx_hash,
+            creator_address,
+            transaction_hash,
+            category,
+            uses_bitr,
+            creator_stake,
+            odds,
+            pool_id,
+            notification_type,
+            message,
+            is_read
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $3, $9, 'oddyssey', FALSE, 0.5, 1.0, $1, 'slip_placed', 'Your Oddyssey slip has been placed successfully', FALSE)
+        `, [
+          slipId.toString(),
+          cycleId.toString(),
+          player,
+          new Date(block.timestamp * 1000),
+          slipData ? JSON.stringify(slipData.predictions) : JSON.stringify([]),
+          0, // final_score
+          0, // correct_count
+          false, // is_evaluated
+          txHash
+        ]);
+        
+        console.log(`   ✅ Successfully indexed slip ${slipId}`);
+        
+        // Also store the event
+        await db.query(`
+          INSERT INTO oddyssey.events (
+            event_type, block_number, transaction_hash, 
+            event_data, created_at
+          ) VALUES ($1, $2, $3, $4, NOW())
+          ON CONFLICT (transaction_hash, event_type) DO NOTHING
+        `, [
+          'SlipPlaced',
+          receipt.blockNumber,
+          txHash,
+          JSON.stringify({ cycleId: cycleId.toString(), player, slipId: slipId.toString() })
+        ]);
+        
+        console.log(`   ✅ Stored SlipPlaced event`);
+        
+      } catch (error) {
+        console.log(`   ❌ Failed to index slip ${slipId}: ${error.message}`);
+      }
+    }
+    
+    // Verify the slip is now in the database
+    console.log('\n🔍 Verifying indexed slips...');
+    const slipsResult = await db.query('SELECT slip_id, player_address, cycle_id FROM oracle.oddyssey_slips ORDER BY slip_id DESC LIMIT 5');
+    console.log(`✅ Database now has ${slipsResult.rows.length} recent slips:`);
+    slipsResult.rows.forEach(slip => {
+      console.log(`   - Slip ${slip.slip_id}: Player ${slip.player_address}, Cycle ${slip.cycle_id}`);
+    });
+    
+  } catch (error) {
+    console.error('❌ Error indexing missing slip:', error);
+  } finally {
+    process.exit();
+  }
+}
+
+manualIndexMissingSlip();

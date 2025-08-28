@@ -1,0 +1,31 @@
+{
+  "data": [
+    {
+      "id": "8",
+      "sport_id": "1",
+      "country_id": "2",
+      "name": "Premier League",
+      "active": true,
+      "short_code": "EPL",
+      "image_path": "https://cdn.sportmonks.com/images/soccer/leagues/8.png",
+      "type": "league",
+      "sub_type": "domestic",
+      "last_played_at": "2025-01-15T20:00:00Z",
+      "category": 1,
+      "has_jerseys": true,
+      "country": {
+        "id": "2",
+        "continent_id": "1",
+        "name": "England",
+        "official_name": "England",
+        "fifa_name": "ENG",
+        "iso2": "GB-ENG",
+        "iso3": "ENG",
+        "latitude": "52.16045",
+        "longitude": "-0.70312",
+        "borders": [],
+        "image_path": "https://cdn.sportmonks.com/images/countries/png/short/gb-eng.png"
+      }
+    }
+  ]
+}
