@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+
+const { ethers } = require('ethers');
+const config = require('./config');
+const db = require('./db/db');
+
+async function fixAllPoolsData() {
+  try {
+    console.log('🔧 Fixing all pools data...');
+    
+    // Initialize provider
+    const provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
+    
+    // Pool contract ABI (minimal for getting pool data)
+    const poolABI = [
+      "function pools(uint256) external view returns (address creator, uint16 odds, bool settled, bool creatorSideWon, bool isPrivate, bool usesBitr, bool filledAbove60, uint8 oracleType, uint256 creatorStake, uint256 totalCreatorSideStake, uint256 maxBettorStake, uint256 totalBettorStake, bytes32 predictedOutcome, bytes32 result, bytes32 marketId, uint256 eventStartTime, uint256 eventEndTime, uint256 bettingEndTime, uint256 resultTimestamp, uint256 arbitrationDeadline, string league, string category, string region, uint256 maxBetPerUser)"
+    ];
+    
+    const poolContract = new ethers.Contract(config.blockchain.contractAddresses.bitredictPool, poolABI, provider);
+    
+    // Get all pools from database
+    const dbPools = await db.query('SELECT pool_id FROM oracle.pools ORDER BY pool_id');
+    console.log(`📊 Found ${dbPools.rows.length} pools in database`);
+    
+    let fixedCount = 0;
+    let errorCount = 0;
+    
+    for (const dbPool of dbPools.rows) {
+      const poolId = parseInt(dbPool.pool_id);
+      console.log(`\n🔍 Processing pool ${poolId}...`);
+      
+      try {
+        // Get pool data from blockchain (pool ID = index - 1)
+        const poolData = await poolContract.pools(poolId - 1);
+        
+        // Convert large numbers to strings for numeric columns, and handle bigint limits
+        const creatorStake = poolData.creatorStake.toString();
+        const maxBetPerUser = poolData.maxBetPerUser.toString();
+        
+        // For bigint columns, we need to handle the size limit
+        const maxBigInt = BigInt('9223372036854775807');
+        
+        let totalCreatorSideStake = poolData.totalCreatorSideStake;
+        let maxBettorStake = poolData.maxBettorStake;
+        
+        if (totalCreatorSideStake > maxBigInt) {
+          console.warn(`⚠️ Pool ${poolId}: totalCreatorSideStake exceeds bigint limit, capping at max value`);
+          totalCreatorSideStake = maxBigInt;
+        }
+        
+        if (maxBettorStake > maxBigInt) {
+          console.warn(`⚠️ Pool ${poolId}: maxBettorStake exceeds bigint limit, capping at max value`);
+          maxBettorStake = maxBigInt;
+        }
+        
+        // Update the database
+        await db.query(`
+          UPDATE oracle.pools SET
+            predicted_outcome = $1,
+            odds = $2,
+            creator_stake = $3,
+            league = $4,
+            category = $5,
+            region = $6,
+            is_private = $7,
+            max_bet_per_user = $8,
+            use_bitr = $9,
+            total_creator_side_stake = $10,
+            max_bettor_stake = $11,
+            total_bettor_stake = $12,
+            betting_end_time = $13,
+            arbitration_deadline = $14,
+            updated_at = NOW()
+          WHERE pool_id = $15
+        `, [
+          poolData.predictedOutcome,
+          Number(poolData.odds),
+          creatorStake,
+          poolData.league || null,
+          poolData.category || null,
+          poolData.region || null,
+          poolData.isPrivate,
+          maxBetPerUser,
+          poolData.usesBitr,
+          totalCreatorSideStake.toString(),
+          maxBettorStake.toString(),
+          poolData.totalBettorStake.toString(),
+          poolData.bettingEndTime.toString(),
+          poolData.arbitrationDeadline.toString(),
+          poolId
+        ]);
+        
+        console.log(`✅ Pool ${poolId} updated successfully`);
+        console.log(`   Creator Stake: ${ethers.formatEther(poolData.creatorStake)} ${poolData.usesBitr ? 'BITR' : 'STT'}`);
+        console.log(`   Odds: ${Number(poolData.odds) / 100}`);
+        console.log(`   League: ${poolData.league}`);
+        console.log(`   Category: ${poolData.category}`);
+        
+        fixedCount++;
+        
+      } catch (error) {
+        console.error(`❌ Error fixing pool ${poolId}:`, error.message);
+        errorCount++;
+      }
+    }
+    
+    console.log(`\n🎉 Fix completed!`);
+    console.log(`✅ Fixed: ${fixedCount} pools`);
+    console.log(`❌ Errors: ${errorCount} pools`);
+    
+  } catch (error) {
+    console.error('❌ Error fixing pools data:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+fixAllPoolsData();

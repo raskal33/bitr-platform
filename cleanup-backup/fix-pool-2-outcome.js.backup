@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+
+const db = require('./db/db');
+
+async function fixPool2Outcome() {
+  try {
+    console.log('🔧 Fixing Pool 2 predicted outcome...');
+    
+    // Update the fixture mapping for Pool 2
+    await db.query(`
+      UPDATE oracle.fixture_mappings 
+      SET predicted_outcome = $1
+      WHERE market_id_hash = $2
+    `, [
+      'Under 2.5 goals in Panathinaikos vs Levadiakos',
+      '0xdfb92ad18d8d18cd35b16a9dc7742b66f54ef362de1390616b90ceb3fb36d8ee'
+    ]);
+    
+    console.log('✅ Updated fixture mapping for Pool 2');
+    
+    // Verify the update
+    const result = await db.query(`
+      SELECT * FROM oracle.fixture_mappings 
+      WHERE market_id_hash = $1
+    `, ['0xdfb92ad18d8d18cd35b16a9dc7742b66f54ef362de1390616b90ceb3fb36d8ee']);
+    
+    console.log('📋 Updated fixture mapping:');
+    console.log(JSON.stringify(result.rows[0], null, 2));
+    
+    // Test the API response
+    console.log('\n🧪 Testing API response...');
+    const axios = require('axios');
+    const response = await axios.get('https://bitredict-backend.fly.dev/api/guided-markets/pools?limit=3');
+    
+    const pool2 = response.data.data.pools.find(p => p.poolId === 2);
+    if (pool2) {
+      console.log('\n✅ Pool 2 API Response:');
+      console.log(`   Pool ID: ${pool2.poolId}`);
+      console.log(`   Title: ${pool2.title}`);
+      console.log(`   League: ${pool2.league}`);
+      console.log(`   Home Team: ${pool2.homeTeam}`);
+      console.log(`   Away Team: ${pool2.awayTeam}`);
+      console.log(`   Predicted Outcome: ${pool2.predictedOutcome}`);
+      console.log(`   Odds: ${pool2.odds}`);
+      console.log(`   Creator Stake: ${pool2.creatorStake}`);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error fixing Pool 2 outcome:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+fixPool2Outcome();

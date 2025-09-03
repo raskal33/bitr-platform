@@ -168,7 +168,13 @@ class AirdropIndexer {
       );
 
       for (const event of transferEvents) {
-        await this.handleBITRTransfer(event);
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handleBITRTransfer(event);
+        } else {
+          console.warn(`⚠️ Skipping BITR Transfer event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       console.log(`Indexed ${transferEvents.length} BITR transfer events`);
@@ -188,7 +194,13 @@ class AirdropIndexer {
       );
 
       for (const event of stakedEvents) {
-        await this.handleStaking(event);
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handleStaking(event);
+        } else {
+          console.warn(`⚠️ Skipping Staked event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       // Unstaking events
@@ -199,7 +211,13 @@ class AirdropIndexer {
       );
 
       for (const event of unstakedEvents) {
-        await this.handleUnstaking(event);
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handleUnstaking(event);
+        } else {
+          console.warn(`⚠️ Skipping Unstaked event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       // Reward claim events
@@ -210,7 +228,13 @@ class AirdropIndexer {
       );
 
       for (const event of claimedEvents) {
-        await this.handleStakingRewardClaim(event);
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handleStakingRewardClaim(event);
+        } else {
+          console.warn(`⚠️ Skipping Claimed event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       console.log(`Indexed ${stakedEvents.length + unstakedEvents.length + claimedEvents.length} staking events`);
@@ -230,7 +254,13 @@ class AirdropIndexer {
       );
 
       for (const event of faucetTransfers) {
-        await this.handleFaucetClaim(event);
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handleFaucetClaim(event);
+        } else {
+          console.warn(`⚠️ Skipping Faucet Transfer event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       console.log(`Indexed ${faucetTransfers.length} faucet claim events`);
@@ -250,7 +280,13 @@ class AirdropIndexer {
       );
 
       for (const event of poolBITREvents) {
-        await this.handlePoolBITRActivity(event, 'POOL_CREATE');
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handlePoolBITRActivity(event, 'POOL_CREATE');
+        } else {
+          console.warn(`⚠️ Skipping Pool BITR event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       // Betting with BITR (if such events exist)
@@ -261,7 +297,13 @@ class AirdropIndexer {
       );
 
       for (const event of betBITREvents) {
-        await this.handlePoolBITRActivity(event, 'BET_PLACE');
+        // CRITICAL FIX: Check transaction success before processing event
+        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+        if (receipt && receipt.status === 1) {
+          await this.handlePoolBITRActivity(event, 'BET_PLACE');
+        } else {
+          console.warn(`⚠️ Skipping Bet BITR event from failed transaction: ${event.transactionHash}`);
+        }
       }
 
       console.log(`Indexed ${poolBITREvents.length + betBITREvents.length} pool BITR events`);

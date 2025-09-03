@@ -278,7 +278,11 @@ contract BitredictPool is Ownable {
             totalCollectedSTT += creationFee;
         }
 
-        uint256 maxStake = _creatorStake / (_odds / 100 - 1);
+        // Calculate max bettor stake with proper handling for odds below 2.00x
+        uint256 oddsDecimal = _odds; // Keep in basis points (e.g., 145 = 1.45x)
+        uint256 denominator = oddsDecimal - 100; // This ensures denominator > 0 for odds > 1.00x
+        require(denominator > 0, "Invalid odds: must be greater than 1.00x");
+        uint256 maxStake = (_creatorStake * 100) / denominator;
         uint256 bettingEnd = _eventStartTime - bettingGracePeriod;
         uint256 arbitrationEnd = _eventEndTime + arbitrationTimeout;
 
@@ -342,7 +346,9 @@ contract BitredictPool is Ownable {
         
         uint256 poolOdds = uint256(pool.odds);
         require(poolOdds >= 100, "Invalid odds for calculation");
-        uint256 currentMaxBettorStake = effectiveCreatorSideStake / (poolOdds / 100 - 1);
+        uint256 denominator = poolOdds - 100; // This ensures denominator > 0 for odds > 1.00x
+        require(denominator > 0, "Invalid odds: must be greater than 1.00x");
+        uint256 currentMaxBettorStake = (effectiveCreatorSideStake * 100) / denominator;
         
         require(pool.totalBettorStake + amount <= currentMaxBettorStake, "Pool full");
         require(pool.totalBettorStake <= type(uint256).max - amount, "Stake overflow");
@@ -419,7 +425,9 @@ contract BitredictPool is Ownable {
         }
         
         require(uint256(pool.odds) >= 100, "Invalid odds for calculation");
-        pool.maxBettorStake = effectiveCreatorSideStake / (uint256(pool.odds) / 100 - 1);
+        uint256 denominator = uint256(pool.odds) - 100; // This ensures denominator > 0 for odds > 1.00x
+        require(denominator > 0, "Invalid odds: must be greater than 1.00x");
+        pool.maxBettorStake = (effectiveCreatorSideStake * 100) / denominator;
 
         // TOKEN CONSISTENCY: Use the same token as the pool
         if (pool.usesBitr) {
@@ -452,7 +460,10 @@ contract BitredictPool is Ownable {
         
         // MATHEMATICAL EDGE CASE: Ensure odds are valid
         if (uint256(pool.odds) >= 100) {
-            pool.maxBettorStake = effectiveCreatorSideStake / (uint256(pool.odds) / 100 - 1);
+            uint256 denominator = uint256(pool.odds) - 100; // This ensures denominator > 0 for odds > 1.00x
+            if (denominator > 0) {
+                pool.maxBettorStake = (effectiveCreatorSideStake * 100) / denominator;
+            }
         }
         
         // Remove from LP array (gas intensive but necessary for clean state)
@@ -717,6 +728,8 @@ contract BitredictPool is Ownable {
             poolIds[i] = activePools[offset + i];
         }
     }
+
+
 
 
 

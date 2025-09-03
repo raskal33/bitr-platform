@@ -9,13 +9,35 @@ const db = require('../db/db');
 class ReputationSyncService {
   constructor() {
     this.provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
-    this.wallet = new ethers.Wallet(process.env.REPUTATION_UPDATER_PRIVATE_KEY || process.env.ORACLE_PRIVATE_KEY, this.provider);
+    
+    // Check for valid private key
+    const privateKey = process.env.REPUTATION_UPDATER_PRIVATE_KEY || process.env.ORACLE_PRIVATE_KEY;
+    if (!privateKey || privateKey === '' || privateKey === 'undefined') {
+      console.warn('⚠️ No valid private key found for ReputationSyncService. Service will be disabled.');
+      this.wallet = null;
+      this.isDisabled = true;
+    } else {
+      try {
+        this.wallet = new ethers.Wallet(privateKey, this.provider);
+        this.isDisabled = false;
+      } catch (error) {
+        console.warn('⚠️ Invalid private key for ReputationSyncService. Service will be disabled.', error.message);
+        this.wallet = null;
+        this.isDisabled = true;
+      }
+    }
+    
     this.reputationContract = null;
     this.isRunning = false;
     this.syncInterval = 5 * 60 * 1000; // 5 minutes
   }
 
   async initialize() {
+    if (this.isDisabled) {
+      console.log('🔇 ReputationSyncService is disabled due to missing/invalid private key');
+      return false;
+    }
+    
     try {
       // Load ReputationSystem contract ABI
       const path = require('path');
@@ -59,13 +81,21 @@ class ReputationSyncService {
   }
 
   async start() {
+    if (this.isDisabled) {
+      console.log('🔇 ReputationSyncService is disabled due to missing/invalid private key');
+      return;
+    }
+    
     if (this.isRunning) {
       console.log('ReputationSyncService is already running');
       return;
     }
 
     if (!this.reputationContract) {
-      await this.initialize();
+      const initialized = await this.initialize();
+      if (!initialized) {
+        return;
+      }
     }
 
     this.isRunning = true;

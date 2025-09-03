@@ -1,0 +1,210 @@
+#!/usr/bin/env node
+
+const { ethers } = require('ethers');
+const config = require('./config');
+const db = require('./db/db');
+
+class PoolDataFixer {
+  constructor() {
+    this.provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
+    this.poolABI = [
+      "function pools(uint256) external view returns (address creator, uint16 odds, bool settled, bool creatorSideWon, bool isPrivate, bool usesBitr, bool filledAbove60, uint8 oracleType, uint256 creatorStake, uint256 totalCreatorSideStake, uint256 maxBettorStake, uint256 totalBettorStake, bytes32 predictedOutcome, bytes32 result, bytes32 marketId, uint256 eventStartTime, uint256 eventEndTime, uint256 bettingEndTime, uint256 resultTimestamp, uint256 arbitrationDeadline, string league, string category, string region, uint256 maxBetPerUser)"
+    ];
+    this.poolContract = new ethers.Contract(config.blockchain.contractAddresses.bitredictPool, this.poolABI, this.provider);
+  }
+
+  async fixAllPoolDataIssues() {
+    console.log('🔧 Starting Comprehensive Pool Data Fix...\n');
+    
+    try {
+      // Step 1: Fix league data from fixture mappings
+      await this.fixLeagueDataFromFixtures();
+      
+      // Step 2: Fix predicted outcome decoding
+      await this.fixPredictedOutcomeDecoding();
+      
+      // Step 3: Generate final report
+      await this.generateFinalReport();
+      
+      console.log('🎉 All pool data issues fixed!');
+      
+    } catch (error) {
+      console.error('❌ Error fixing pool data issues:', error);
+    } finally {
+      process.exit(0);
+    }
+  }
+
+  async fixLeagueDataFromFixtures() {
+    console.log('📝 Step 1: Fixing league data from fixture mappings...');
+    
+    // Get all pools with their market IDs
+    const pools = await db.query(`
+      SELECT p.pool_id, p.market_id, p.league, p.category, 
+             fm.league_name as fixture_league, fm.home_team, fm.away_team
+      FROM oracle.pools p
+      LEFT JOIN oracle.fixture_mappings fm ON p.market_id = fm.market_id_hash
+      WHERE p.category = 'football'
+      ORDER BY p.pool_id
+    `);
+    
+    let fixedCount = 0;
+    
+    for (const pool of pools.rows) {
+      if (pool.fixture_league && pool.league !== pool.fixture_league) {
+        console.log(`🔧 Fixing pool ${pool.pool_id}:`);
+        console.log(`   Current league: ${pool.league}`);
+        console.log(`   Correct league: ${pool.fixture_league}`);
+        console.log(`   Teams: ${pool.home_team} vs ${pool.away_team}`);
+        
+        // Update the pool with correct league data
+        await db.query(`
+          UPDATE oracle.pools 
+          SET league = $1, updated_at = NOW()
+          WHERE pool_id = $2
+        `, [pool.fixture_league, pool.pool_id]);
+        
+        fixedCount++;
+        console.log(`   ✅ Fixed`);
+      }
+    }
+    
+    console.log(`\n📊 League fixes: ${fixedCount} pools updated`);
+  }
+
+  async fixPredictedOutcomeDecoding() {
+    console.log('\n🔍 Step 2: Fixing predicted outcome decoding...');
+    
+    // Get all pools with hash predictions
+    const pools = await db.query(`
+      SELECT p.pool_id, p.predicted_outcome, p.market_id, p.category,
+             fm.home_team, fm.away_team, fm.league_name
+      FROM oracle.pools p
+      LEFT JOIN oracle.fixture_mappings fm ON p.market_id = fm.market_id_hash
+      WHERE p.predicted_outcome LIKE '0x%'
+      ORDER BY p.pool_id
+    `);
+    
+    let fixedCount = 0;
+    
+    for (const pool of pools.rows) {
+      console.log(`\n🔍 Processing pool ${pool.pool_id}:`);
+      console.log(`   Hash: ${pool.predicted_outcome}`);
+      
+      try {
+        // Try to decode the hash
+        const decodedOutcome = ethers.toUtf8String(pool.predicted_outcome);
+        
+        if (decodedOutcome && decodedOutcome.trim() && !decodedOutcome.includes('\u0000')) {
+          console.log(`   Decoded: ${decodedOutcome}`);
+          
+          // Create a readable outcome with team names if available
+          let readableOutcome = decodedOutcome;
+          let betMarketType = "Other";
+          
+          if (pool.home_team && pool.away_team) {
+            const outcome = decodedOutcome.toLowerCase();
+            
+            if (['1', 'home'].includes(outcome)) {
+              readableOutcome = `${pool.home_team} wins`;
+              betMarketType = "Match Result";
+            } else if (['2', 'away'].includes(outcome)) {
+              readableOutcome = `${pool.away_team} wins`;
+              betMarketType = "Match Result";
+            } else if (['x', 'draw'].includes(outcome)) {
+              readableOutcome = `Draw between ${pool.home_team} and ${pool.away_team}`;
+              betMarketType = "Match Result";
+            } else if (['o', 'over'].some(term => outcome.includes(term))) {
+              readableOutcome = `Over 2.5 goals in ${pool.home_team} vs ${pool.away_team}`;
+              betMarketType = "Goals Over/Under";
+            } else if (['u', 'under'].some(term => outcome.includes(term))) {
+              readableOutcome = `Under 2.5 goals in ${pool.home_team} vs ${pool.away_team}`;
+              betMarketType = "Goals Over/Under";
+            } else if (['btts', 'both teams'].some(term => outcome.includes(term))) {
+              if (outcome.includes('yes')) {
+                readableOutcome = `Both teams to score in ${pool.home_team} vs ${pool.away_team}`;
+              } else {
+                readableOutcome = `Not both teams to score in ${pool.home_team} vs ${pool.away_team}`;
+              }
+              betMarketType = "Both Teams To Score";
+            } else {
+              // Generic outcome with team names
+              readableOutcome = `${decodedOutcome} in ${pool.home_team} vs ${pool.away_team}`;
+              betMarketType = "Other";
+            }
+          }
+          
+          console.log(`   Readable: ${readableOutcome}`);
+          console.log(`   Market Type: ${betMarketType}`);
+          
+          // Update the fixture mapping with the decoded outcome
+          await db.query(`
+            UPDATE oracle.fixture_mappings 
+            SET predicted_outcome = $1
+            WHERE market_id_hash = $2
+          `, [readableOutcome, pool.market_id]);
+          
+          fixedCount++;
+          console.log(`   ✅ Updated fixture mapping`);
+          
+        } else {
+          console.log(`   ⚠️ Could not decode hash properly`);
+        }
+        
+      } catch (error) {
+        console.log(`   ❌ Error decoding: ${error.message}`);
+      }
+    }
+    
+    console.log(`\n📊 Prediction fixes: ${fixedCount} fixture mappings updated`);
+  }
+
+  async generateFinalReport() {
+    console.log('\n📊 Step 3: Generating final report...');
+    
+    // Check all pools
+    const pools = await db.query(`
+      SELECT p.pool_id, p.league, p.category, p.predicted_outcome, p.odds, p.creator_stake,
+             fm.home_team, fm.away_team, fm.league_name, fm.predicted_outcome as fixture_outcome
+      FROM oracle.pools p
+      LEFT JOIN oracle.fixture_mappings fm ON p.market_id = fm.market_id_hash
+      ORDER BY p.pool_id
+    `);
+    
+    console.log('\n📈 Final Pool Data Report:');
+    pools.rows.forEach(pool => {
+      console.log(`\nPool ${pool.pool_id}:`);
+      console.log(`   League: ${pool.league} (fixture: ${pool.fixture_league_name})`);
+      console.log(`   Teams: ${pool.home_team || 'N/A'} vs ${pool.away_team || 'N/A'}`);
+      console.log(`   Predicted Outcome: ${pool.predicted_outcome}`);
+      console.log(`   Fixture Outcome: ${pool.fixture_outcome || 'N/A'}`);
+      console.log(`   Odds: ${pool.odds}`);
+      console.log(`   Creator Stake: ${pool.creator_stake}`);
+    });
+    
+    // Test API response
+    console.log('\n🧪 Testing API response...');
+    try {
+      const axios = require('axios');
+      const response = await axios.get('https://bitredict-backend.fly.dev/api/guided-markets/pools?limit=3');
+      
+      console.log('\nAPI Response for first pool:');
+      const firstPool = response.data.data.pools[0];
+      console.log(`   Pool ID: ${firstPool.poolId}`);
+      console.log(`   Title: ${firstPool.title}`);
+      console.log(`   League: ${firstPool.league}`);
+      console.log(`   Home Team: ${firstPool.homeTeam}`);
+      console.log(`   Away Team: ${firstPool.awayTeam}`);
+      console.log(`   Predicted Outcome: ${firstPool.predictedOutcome}`);
+      console.log(`   Odds: ${firstPool.odds}`);
+      console.log(`   Creator Stake: ${firstPool.creatorStake}`);
+      
+    } catch (error) {
+      console.log('❌ API test failed:', error.message);
+    }
+  }
+}
+
+// Run the fix
+const fixer = new PoolDataFixer();
+fixer.fixAllPoolDataIssues();

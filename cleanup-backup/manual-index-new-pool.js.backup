@@ -1,0 +1,184 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+async function manualIndexNewPool() {
+  console.log('🔧 Manually indexing new pool transaction...\n');
+  
+  try {
+    // Transaction details from user
+    const transactionHash = '0x53ddee58edb1f85b07e07f65ddd609f799a5d37a36820af14fdebdf045ced892';
+    const blockNumber = 164316458;
+    const creatorAddress = '0xA336C7B8cBe75D5787F25A62FE282B83Ac0f3363';
+    const contractAddress = '0xBe9ad7A4CA367d45E61Fc20BbC5C44230e83E9f3';
+    const bitrAmount = '3550000000000000000000'; // 3,550 BITR in wei
+    
+    console.log('Transaction Details:');
+    console.log(`  Hash: ${transactionHash}`);
+    console.log(`  Block: ${blockNumber}`);
+    console.log(`  Creator: ${creatorAddress}`);
+    console.log(`  Contract: ${contractAddress}`);
+    console.log(`  BITR Amount: ${bitrAmount} wei (3,550 BITR)`);
+    console.log('');
+    
+    // 1. Check if transaction already exists
+    console.log('1. Checking if transaction already indexed...');
+    
+    const existingEvent = await db.query(`
+      SELECT * FROM oracle.blockchain_events 
+      WHERE transaction_hash = $1
+    `, [transactionHash]);
+    
+    if (existingEvent.rows.length > 0) {
+      console.log('✅ Transaction already indexed!');
+      console.log('Event data:', existingEvent.rows[0]);
+      return;
+    }
+    
+    console.log('❌ Transaction not found, proceeding with manual indexing...');
+    console.log('');
+    
+    // 2. Get the next pool ID
+    console.log('2. Getting next pool ID...');
+    
+    const poolCountResult = await db.query('SELECT COUNT(*) as count FROM oracle.pools');
+    const nextPoolId = poolCountResult.rows[0].count;
+    
+    console.log(`Next pool ID will be: ${nextPoolId}`);
+    console.log('');
+    
+    // 3. Create a placeholder pool entry
+    console.log('3. Creating pool entry...');
+    
+    const insertPoolQuery = `
+      INSERT INTO oracle.pools (
+        pool_id, creator_address, predicted_outcome, odds, creator_stake,
+        event_start_time, event_end_time, league, category, region,
+        status, created_at, updated_at, market_id, max_bet_per_user,
+        total_creator_side_stake, max_bettor_stake, total_bettor_stake,
+        creator_side_won, betting_end_time, arbitration_deadline, filled_above_60
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(),
+        $12, $13, $14, $15, $16, $17, $18, $19, $20
+      )
+      RETURNING *
+    `;
+    
+    // For now, we'll create a placeholder with estimated values
+    // The actual values will be updated when we decode the transaction
+    const poolParams = [
+      nextPoolId.toString(),           // pool_id
+      creatorAddress,                  // creator_address
+      '0x0000000000000000000000000000000000000000000000000000000000000000', // predicted_outcome (placeholder)
+      150,                             // odds (placeholder)
+      bitrAmount,                      // creator_stake
+      Math.floor(Date.now() / 1000) + 3600,  // event_start_time (1 hour from now)
+      Math.floor(Date.now() / 1000) + 7200,  // event_end_time (2 hours from now)
+      'Unknown League',                // league (placeholder)
+      'football',                      // category (placeholder)
+      'global',                        // region
+      'active',                        // status
+      '0x0000000000000000000000000000000000000000000000000000000000000000', // market_id (placeholder)
+      '1000000000000000000000',       // max_bet_per_user (1 BITR)
+      bitrAmount,                      // total_creator_side_stake
+      '0',                             // max_bettor_stake
+      '0',                             // total_bettor_stake
+      false,                           // creator_side_won
+      Math.floor(Date.now() / 1000) + 3600,  // betting_end_time
+      Math.floor(Date.now() / 1000) + 7200,  // arbitration_deadline
+      false                            // filled_above_60
+    ];
+    
+    const poolResult = await db.query(insertPoolQuery, poolParams);
+    
+    if (poolResult.rows.length > 0) {
+      console.log(`✅ Created pool with ID: ${nextPoolId}`);
+      console.log('Pool data:', poolResult.rows[0]);
+    } else {
+      console.log('❌ Failed to create pool');
+      return;
+    }
+    
+    console.log('');
+    
+    // 4. Create blockchain event entry
+    console.log('4. Creating blockchain event entry...');
+    
+    const eventData = {
+      poolId: nextPoolId.toString(),
+      creator: creatorAddress,
+      marketId: '0x0000000000000000000000000000000000000000000000000000000000000000', // placeholder
+      oracleType: '0',
+      eventEndTime: Math.floor(Date.now() / 1000) + 7200,
+      eventStartTime: Math.floor(Date.now() / 1000) + 3600
+    };
+    
+    const insertEventQuery = `
+      INSERT INTO oracle.blockchain_events (
+        block_number, transaction_hash, log_index, event_type, 
+        contract_address, event_data, processed_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING *
+    `;
+    
+    const eventParams = [
+      blockNumber.toString(),
+      transactionHash,
+      0, // log_index
+      'PoolCreated',
+      contractAddress,
+      JSON.stringify(eventData, (key, value) => typeof value === 'bigint' ? value.toString() : value)
+    ];
+    
+    const eventResult = await db.query(insertEventQuery, eventParams);
+    
+    if (eventResult.rows.length > 0) {
+      console.log('✅ Created blockchain event entry');
+      console.log('Event data:', eventResult.rows[0]);
+    } else {
+      console.log('❌ Failed to create blockchain event');
+    }
+    
+    console.log('');
+    
+    // 5. Update indexed blocks
+    console.log('5. Updating indexed blocks...');
+    
+    const updateIndexedBlocksQuery = `
+      INSERT INTO oracle.indexed_blocks (block_number, indexed_at)
+      VALUES ($1, NOW())
+      ON CONFLICT (block_number) DO NOTHING
+    `;
+    
+    await db.query(updateIndexedBlocksQuery, [blockNumber.toString()]);
+    console.log(`✅ Updated indexed blocks to include block ${blockNumber}`);
+    
+    console.log('');
+    console.log('🎉 Manual indexing completed!');
+    console.log('');
+    
+    // 6. Show final state
+    console.log('📊 Final pool count:');
+    const finalCount = await db.query(`
+      SELECT COUNT(*) as total_pools, 
+             COUNT(CASE WHEN status = 'active' THEN 1 END) as active_pools,
+             COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_pools
+      FROM oracle.pools
+    `);
+    
+    const stats = finalCount.rows[0];
+    console.log(`   Total pools: ${stats.total_pools}`);
+    console.log(`   Active pools: ${stats.active_pools}`);
+    console.log(`   Closed pools: ${stats.closed_pools}`);
+    
+    console.log('');
+    console.log('⚠️  Note: This is a placeholder entry. The actual pool data will need to be updated');
+    console.log('   when the transaction details are properly decoded.');
+    
+  } catch (error) {
+    console.error('❌ Error manually indexing pool:', error.message);
+    throw error;
+  }
+}
+
+// Run the manual indexing
+manualIndexNewPool();

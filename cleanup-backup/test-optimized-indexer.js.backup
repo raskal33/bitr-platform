@@ -1,0 +1,141 @@
+const OptimizedIndexerV3 = require('./optimized-indexer-v3');
+
+async function testOptimizedIndexer() {
+  console.log('🧪 Testing Optimized Indexer V3...');
+  
+  try {
+    // Initialize the indexer
+    const indexer = new OptimizedIndexerV3();
+    await indexer.initialize();
+    
+    console.log('✅ Indexer initialized successfully');
+    console.log(`📊 Current state: last indexed block = ${indexer.state.lastIndexedBlock}`);
+    
+    // Get current blockchain block
+    const currentBlock = await indexer.rpcManager.getBlockNumber();
+    console.log(`📊 Current blockchain block: ${currentBlock}`);
+    
+    // Calculate lag
+    const lag = currentBlock - indexer.state.lastIndexedBlock;
+    console.log(`📊 Indexer lag: ${lag} blocks`);
+    
+    // Check if the missing pool transaction is in range
+    const missingPoolBlock = 164316458;
+    const missingPoolTx = '0x53ddee58edb1f85b07e07f65ddd609f799a5d37a36820af14fdebdf045ced892';
+    
+    console.log(`🔍 Looking for missing pool at block ${missingPoolBlock}`);
+    console.log(`🔍 Transaction: ${missingPoolTx}`);
+    
+    if (missingPoolBlock > indexer.state.lastIndexedBlock) {
+      console.log('✅ Missing pool block is ahead of current index - will be caught up');
+    } else {
+      console.log('❌ Missing pool block should have been indexed already');
+    }
+    
+    // Test processing a small batch to catch up
+    console.log('\n🚀 Testing batch processing...');
+    
+    const testFromBlock = indexer.state.lastIndexedBlock + 1;
+    const testToBlock = Math.min(testFromBlock + 100, currentBlock - 10); // Process 100 blocks
+    
+    console.log(`📊 Testing batch: ${testFromBlock} to ${testToBlock}`);
+    
+    // Process a small batch
+    await indexer.processBatch(testFromBlock, testToBlock);
+    
+    console.log('✅ Batch processing completed');
+    console.log(`📊 New last indexed block: ${indexer.state.lastIndexedBlock}`);
+    
+    // Check if we found the missing pool
+    const db = require('./db/db');
+    const poolResult = await db.query(`
+      SELECT * FROM oracle.pools ORDER BY created_at DESC LIMIT 5
+    `);
+    
+    console.log('\n📊 Latest pools in database:');
+    poolResult.rows.forEach(pool => {
+      console.log(`  Pool ${pool.pool_id}: ${pool.creator_address} - ${pool.status}`);
+    });
+    
+    // Check for the specific transaction
+    const eventResult = await db.query(`
+      SELECT * FROM oracle.blockchain_events 
+      WHERE transaction_hash = $1 OR block_number = $2
+      ORDER BY block_number DESC
+    `, [missingPoolTx, missingPoolBlock]);
+    
+    console.log('\n🔍 Events for missing pool transaction:');
+    if (eventResult.rows.length > 0) {
+      eventResult.rows.forEach(event => {
+        console.log(`  Block ${event.block_number}: ${event.event_type} - ${event.transaction_hash}`);
+      });
+    } else {
+      console.log('  ❌ No events found for missing pool transaction');
+    }
+    
+    // Test RPC connectivity
+    console.log('\n🌐 Testing RPC connectivity...');
+    try {
+      const block = await indexer.provider.getBlock(missingPoolBlock);
+      if (block) {
+        console.log(`✅ Block ${missingPoolBlock} retrieved successfully`);
+        console.log(`  Timestamp: ${new Date(block.timestamp * 1000)}`);
+        console.log(`  Transactions: ${block.transactions.length}`);
+        
+        // Look for our transaction in this block
+        const targetTx = block.transactions.find(tx => tx === missingPoolTx);
+        if (targetTx) {
+          console.log(`✅ Found target transaction in block ${missingPoolBlock}`);
+        } else {
+          console.log(`❌ Target transaction not found in block ${missingPoolBlock}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error retrieving block:', error.message);
+    }
+    
+    // Test event filtering
+    console.log('\n🔍 Testing event filtering...');
+    try {
+      const events = await indexer.poolContract.queryFilter(
+        indexer.poolContract.filters.PoolCreated(),
+        missingPoolBlock,
+        missingPoolBlock
+      );
+      
+      console.log(`📊 Found ${events.length} PoolCreated events in block ${missingPoolBlock}`);
+      events.forEach(event => {
+        console.log(`  Pool ${event.args.poolId}: ${event.args.creator} - ${event.transactionHash}`);
+      });
+    } catch (error) {
+      console.error('❌ Error filtering events:', error.message);
+    }
+    
+    // Test performance metrics
+    console.log('\n📈 Performance Metrics:');
+    console.log(`  Batch Size: ${indexer.batchSize} blocks`);
+    console.log(`  Max Batch Size: ${indexer.maxBatchSize} blocks`);
+    console.log(`  Processing Delay: ${indexer.processingDelay}ms`);
+    console.log(`  RPC Endpoints: ${indexer.rpcManager.rpcUrls ? indexer.rpcManager.rpcUrls.length : 'unknown'}`);
+    
+    console.log('\n✅ Optimized Indexer V3 test completed');
+    
+  } catch (error) {
+    console.error('❌ Test failed:', error);
+  }
+}
+
+// Run the test
+if (require.main === module) {
+  testOptimizedIndexer()
+    .then(() => {
+      console.log('🎉 Test completed successfully');
+      process.exit(0);
+    })
+    .catch(error => {
+      console.error('💥 Test failed:', error);
+      process.exit(1);
+    });
+}
+
+module.exports = { testOptimizedIndexer };

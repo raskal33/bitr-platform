@@ -161,6 +161,10 @@ class EnhancedBitredictIndexer {
       this.lastIndexedBlock = result.rows[0]?.last_block || 0;
       
       console.log(`📊 Starting from block: ${this.lastIndexedBlock}`);
+      
+      // Check for missing blocks and catch up if needed
+      await this.catchUpMissingBlocks();
+      
       console.log('✅ Enhanced indexer initialized successfully');
       
       // Log initial RPC status
@@ -169,6 +173,83 @@ class EnhancedBitredictIndexer {
     } catch (error) {
       console.error('❌ Failed to initialize enhanced indexer:', error);
       throw error;
+    }
+  }
+
+  async catchUpMissingBlocks() {
+    try {
+      console.log('🔍 Checking for missing blocks...');
+      
+      // Get all indexed blocks to find gaps
+      const db = require('./db/db');
+      const result = await db.query(`
+        SELECT block_number 
+        FROM oracle.indexed_blocks 
+        WHERE block_number >= $1 
+        ORDER BY block_number
+      `, [Math.max(0, this.lastIndexedBlock - 1000)]); // Check last 1000 blocks
+      
+      const indexedBlocks = new Set(result.rows.map(row => parseInt(row.block_number)));
+      const currentBlock = await this.rpcManager.getBlockNumber();
+      
+      // Find missing blocks
+      const missingBlocks = [];
+      for (let block = Math.max(0, this.lastIndexedBlock - 1000); block <= currentBlock; block++) {
+        if (!indexedBlocks.has(block)) {
+          missingBlocks.push(block);
+        }
+      }
+      
+      if (missingBlocks.length > 0) {
+        console.log(`⚠️ Found ${missingBlocks.length} missing blocks, attempting to catch up...`);
+        
+        // Process missing blocks in chunks
+        const chunkSize = 20;
+        for (let i = 0; i < missingBlocks.length; i += chunkSize) {
+          const chunk = missingBlocks.slice(i, i + chunkSize);
+          const startBlock = Math.min(...chunk);
+          const endBlock = Math.max(...chunk);
+          
+          console.log(`🔄 Catching up blocks ${startBlock} to ${endBlock}...`);
+          
+          try {
+            await this.indexPoolEvents(startBlock, endBlock);
+            await this.indexOracleEvents(startBlock, endBlock);
+            await this.indexOddysseyEvents(startBlock, endBlock);
+            await this.indexReputationEvents(startBlock, endBlock);
+            
+            // Mark blocks as indexed
+            for (const block of chunk) {
+              await this.updateLastIndexedBlock(block);
+            }
+            
+            console.log(`✅ Caught up ${chunk.length} blocks`);
+            
+            // Small delay between chunks
+            if (i + chunkSize < missingBlocks.length) {
+              await this.sleep(500);
+            }
+            
+          } catch (error) {
+            console.error(`❌ Failed to catch up blocks ${startBlock} to ${endBlock}:`, error.message);
+            // Continue with next chunk instead of stopping
+          }
+        }
+        
+        // Update last indexed block to the highest processed block
+        const maxProcessedBlock = Math.max(...missingBlocks.filter(block => 
+          indexedBlocks.has(block) || block <= this.lastIndexedBlock
+        ));
+        this.lastIndexedBlock = Math.max(this.lastIndexedBlock, maxProcessedBlock);
+        
+        console.log(`✅ Catch-up completed. Last indexed block: ${this.lastIndexedBlock}`);
+      } else {
+        console.log('✅ No missing blocks found');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error during catch-up process:', error);
+      // Don't throw - allow indexer to continue
     }
   }
 
@@ -221,30 +302,53 @@ class EnhancedBitredictIndexer {
     const currentBlock = await this.rpcManager.getBlockNumber();
     const confirmationBlock = currentBlock - config.indexer.confirmationBlocks;
     
-    // SIMPLE APPROACH: Always index only the last 10 blocks
-    const blocksToIndex = 10;
-    const fromBlock = Math.max(1, confirmationBlock - blocksToIndex + 1);
+    // FIXED APPROACH: Index all blocks from last indexed to confirmation block
+    const fromBlock = this.lastIndexedBlock + 1;
     const toBlock = confirmationBlock;
     
     // Skip if we already processed this range
-    if (this.lastIndexedBlock >= toBlock) {
+    if (fromBlock > toBlock) {
       return; // No new blocks to index
     }
     
-    console.log(`🔍 Indexing last ${blocksToIndex} blocks: ${fromBlock} to ${toBlock} (current: ${currentBlock})`);
+    console.log(`🔍 Indexing blocks: ${fromBlock} to ${toBlock} (current: ${currentBlock})`);
     
-    // Index events from all contracts
-    await this.indexPoolEvents(fromBlock, toBlock);
-    await this.indexOracleEvents(fromBlock, toBlock);
-    await this.indexOddysseyEvents(fromBlock, toBlock);
-    await this.indexReputationEvents(fromBlock, toBlock);
+    // Process blocks ONE BY ONE to ensure no blocks are missed
+    let processedBlocks = 0;
     
-    // Update last indexed block
-    await this.updateLastIndexedBlock(toBlock);
-    this.lastIndexedBlock = toBlock;
+    for (let block = fromBlock; block <= toBlock; block++) {
+      try {
+        console.log(`📦 Processing block ${block}...`);
+        
+        // Index events from all contracts for this single block
+        await this.indexPoolEvents(block, block);
+        await this.indexOracleEvents(block, block);
+        await this.indexOddysseyEvents(block, block);
+        await this.indexReputationEvents(block, block);
+        
+        // Update last indexed block for this block
+        await this.updateLastIndexedBlock(block);
+        this.lastIndexedBlock = block;
+        
+        processedBlocks++;
+        this.healthStats.totalBlocks++;
+        this.healthStats.lastSuccessfulBlock = block;
+        
+        // Small delay between blocks to avoid overwhelming RPC
+        if (block < toBlock) {
+          await this.sleep(50);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error processing block ${block}:`, error.message);
+        // Continue with next block instead of stopping
+        // Don't update lastIndexedBlock for failed blocks
+      }
+    }
     
-    this.healthStats.totalBlocks += (toBlock - fromBlock + 1);
-    this.healthStats.lastSuccessfulBlock = toBlock;
+    if (processedBlocks > 0) {
+      console.log(`✅ Successfully processed ${processedBlocks} blocks`);
+    }
   }
 
   async indexPoolEvents(fromBlock, toBlock) {
@@ -285,8 +389,14 @@ class EnhancedBitredictIndexer {
           );
 
           for (const event of betPlacedEvents) {
-            await this.handleBetPlaced(event);
-            this.healthStats.totalEvents++;
+            // CRITICAL FIX: Check transaction success before processing event
+            const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+            if (receipt && receipt.status === 1) {
+              await this.handleBetPlaced(event);
+              this.healthStats.totalEvents++;
+            } else {
+              console.warn(`⚠️ Skipping BetPlaced event from failed transaction: ${event.transactionHash}`);
+            }
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -308,8 +418,14 @@ class EnhancedBitredictIndexer {
           );
 
           for (const event of poolSettledEvents) {
-            await this.handlePoolSettled(event);
-            this.healthStats.totalEvents++;
+            // CRITICAL FIX: Check transaction success before processing event
+            const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+            if (receipt && receipt.status === 1) {
+              await this.handlePoolSettled(event);
+              this.healthStats.totalEvents++;
+            } else {
+              console.warn(`⚠️ Skipping PoolSettled event from failed transaction: ${event.transactionHash}`);
+            }
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -364,8 +480,14 @@ class EnhancedBitredictIndexer {
           );
 
           for (const event of outcomeEvents) {
-            await this.handleOutcomeSubmitted(event);
-            this.healthStats.totalEvents++;
+            // CRITICAL FIX: Check transaction success before processing event
+            const receipt = await this.rpcManager.getTransactionReceipt(event.transactionHash);
+            if (receipt && receipt.status === 1) {
+              await this.handleOutcomeSubmitted(event);
+              this.healthStats.totalEvents++;
+            } else {
+              console.warn(`⚠️ Skipping OutcomeSubmitted event from failed transaction: ${event.transactionHash}`);
+            }
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -402,8 +524,14 @@ class EnhancedBitredictIndexer {
             );
 
             for (const event of events) {
-              await this.handleOddysseyEvent(event, eventType);
-              this.healthStats.totalEvents++;
+              // CRITICAL FIX: Check transaction success before processing event
+              const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+              if (receipt && receipt.status === 1) {
+                await this.handleOddysseyEvent(event, eventType);
+                this.healthStats.totalEvents++;
+              } else {
+                console.warn(`⚠️ Skipping ${eventType} event from failed transaction: ${event.transactionHash}`);
+              }
             }
           } catch (error) {
             if (error.message && error.message.includes('block range exceeds')) {
@@ -437,8 +565,14 @@ class EnhancedBitredictIndexer {
             );
 
             for (const event of events) {
-              await this.handleReputationEvent(event, eventType);
-              this.healthStats.totalEvents++;
+              // CRITICAL FIX: Check transaction success before processing event
+              const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+              if (receipt && receipt.status === 1) {
+                await this.handleReputationEvent(event, eventType);
+                this.healthStats.totalEvents++;
+              } else {
+                console.warn(`⚠️ Skipping ${eventType} event from failed transaction: ${event.transactionHash}`);
+              }
             }
           } catch (error) {
             if (error.message && error.message.includes('block range exceeds')) {
@@ -559,7 +693,7 @@ class EnhancedBitredictIndexer {
         cycleId.toString(),
         player,
         new Date(block.timestamp * 1000),
-        JSON.stringify(slipData.predictions || []),
+        JSON.stringify(slipData.predictions || [], (key, value) => typeof value === 'bigint' ? value.toString() : value),
         0, // final_score
         0, // correct_count
         false, // is_evaluated
@@ -581,7 +715,7 @@ class EnhancedBitredictIndexer {
         event.logIndex,
         'SlipPlaced',
         event.address,
-        JSON.stringify({ cycleId: cycleId.toString(), player, slipId: slipId.toString() })
+        JSON.stringify({ cycleId: cycleId.toString(), player, slipId: slipId.toString() }, (key, value) => typeof value === 'bigint' ? value.toString() : value)
       ]);
       
     } catch (error) {

@@ -1,0 +1,147 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+async function checkRefundStatus() {
+  console.log('🔍 Checking Refund Status for Closed Pools...\n');
+  
+  try {
+    // 1. Check all pools status
+    console.log('1. Pool Status Analysis:');
+    
+    const poolsResult = await db.query(`
+      SELECT 
+        pool_id,
+        creator_address,
+        status,
+        creator_stake,
+        total_bettor_stake,
+        created_at,
+        updated_at,
+        result,
+        result_timestamp
+      FROM oracle.pools 
+      ORDER BY created_at DESC
+    `);
+    
+    console.log(`Found ${poolsResult.rows.length} pools:`);
+    
+    for (const pool of poolsResult.rows) {
+      console.log(`\n   Pool ${pool.pool_id}:`);
+      console.log(`     Creator: ${pool.creator_address}`);
+      console.log(`     Status: ${pool.status}`);
+      console.log(`     Creator Stake: ${ethers.formatEther(pool.creator_stake)} STT`);
+      console.log(`     Bettor Stake: ${ethers.formatEther(pool.total_bettor_stake)} STT`);
+      console.log(`     Created: ${new Date(pool.created_at).toLocaleString()}`);
+      console.log(`     Updated: ${new Date(pool.updated_at).toLocaleString()}`);
+      
+      if (pool.status === 'closed' && pool.total_bettor_stake === '0') {
+        console.log(`     🚨 ELIGIBLE FOR REFUND - No bets placed!`);
+      }
+    }
+    
+    console.log('');
+    
+    // 2. Check blockchain events for refunds
+    console.log('2. Blockchain Refund Events:');
+    
+    const refundEvents = await db.query(`
+      SELECT * FROM oracle.blockchain_events 
+      WHERE event_type = 'PoolRefunded' 
+      ORDER BY block_number DESC
+    `);
+    
+    if (refundEvents.rows.length === 0) {
+      console.log('   ❌ No PoolRefunded events found in database');
+      console.log('   This means refunds may not have been processed yet');
+    } else {
+      console.log(`   Found ${refundEvents.rows.length} refund events:`);
+      refundEvents.rows.forEach(event => {
+        console.log(`     Pool ${event.event_data.poolId}: ${event.event_data.reason}`);
+      });
+    }
+    
+    console.log('');
+    
+    // 3. Check user's Oddyssey slips and prizes
+    console.log('3. User Oddyssey Activity:');
+    
+    const userAddress = '0xA336C7B8cBe75D5787F25A62FE282B83Ac0f3363';
+    
+    const userSlips = await db.query(`
+      SELECT 
+        slip_id,
+        cycle_id,
+        final_score,
+        correct_count,
+        is_evaluated,
+        leaderboard_rank,
+        prize_claimed,
+        placed_at
+      FROM oracle.oddyssey_slips 
+      WHERE player_address = $1
+      ORDER BY placed_at DESC
+    `, [userAddress]);
+    
+    console.log(`   Found ${userSlips.rows.length} Oddyssey slips:`);
+    
+    for (const slip of userSlips.rows) {
+      console.log(`\n     Slip ${slip.slip_id} (Cycle ${slip.cycle_id}):`);
+      console.log(`       Final Score: ${slip.final_score}`);
+      console.log(`       Correct Predictions: ${slip.correct_count}/10`);
+      console.log(`       Rank: ${slip.leaderboard_rank}`);
+      console.log(`       Evaluated: ${slip.is_evaluated}`);
+      console.log(`       Prize Claimed: ${slip.prize_claimed}`);
+      console.log(`       Placed: ${new Date(slip.placed_at).toLocaleString()}`);
+      
+      if (slip.is_evaluated && !slip.prize_claimed && slip.leaderboard_rank <= 3) {
+        console.log(`       🏆 PRIZE AVAILABLE FOR CLAIM!`);
+      }
+    }
+    
+    console.log('');
+    
+    // 4. Provide refund guidance
+    console.log('4. Refund Guidance:');
+    console.log('');
+    console.log('🚨 POOL REFUNDS NEEDED:');
+    console.log('   Both pools are closed with zero bettor stakes.');
+    console.log('   You should be able to claim refunds as the pool creator.');
+    console.log('');
+    console.log('🏆 ODDYSSEY PRIZES AVAILABLE:');
+    console.log('   You have 2 evaluated slips with unclaimed prizes:');
+    console.log('   - Slip 0 (Cycle 3): Rank 1 - Prize available');
+    console.log('   - Slip 1 (Cycle 7): Rank 2 - Prize available');
+    console.log('');
+    console.log('📋 NEXT STEPS:');
+    console.log('   1. Check if refund function is available on contract');
+    console.log('   2. Claim Oddyssey prizes for both slips');
+    console.log('   3. Verify profile page shows correct refund/prize status');
+    
+    console.log('');
+    
+    // 5. Check profile page integration
+    console.log('5. Profile Page Integration Check:');
+    
+    // Check if user profile endpoints exist
+    const profileEndpoints = [
+      '/api/users/0xA336C7B8cBe75D5787F25A62FE282B83Ac0f3363',
+      '/api/oddyssey/user-slips/0xA336C7B8cBe75D5787F25A62FE282B83Ac0f3363',
+      '/api/pools/claimable/0xA336C7B8cBe75D5787F25A62FE282B83Ac0f3363'
+    ];
+    
+    console.log('   Profile endpoints to verify:');
+    profileEndpoints.forEach(endpoint => {
+      console.log(`     ${endpoint}`);
+    });
+    
+    console.log('');
+    console.log('✅ Refund status check completed!');
+    
+  } catch (error) {
+    console.error('❌ Error checking refund status:', error.message);
+    throw error;
+  }
+}
+
+// Run the check
+checkRefundStatus();

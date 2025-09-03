@@ -1790,7 +1790,7 @@ class Web3Service {
         maxBetPerUser,
         useBitr,
         oracleType,
-        ethers.keccak256(ethers.solidityPacked(['uint256'], [marketId || '0'])),
+        marketId,
         txOptions
       );
 

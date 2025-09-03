@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+
+const db = require('./db/db');
+
+async function fixDatabaseSchema() {
+  try {
+    console.log('🔧 Fixing database schema for large numbers...');
+    
+    // Fix the bigint columns that can't handle large token amounts
+    const schemaFixes = [
+      // Change total_creator_side_stake from bigint to numeric
+      `ALTER TABLE oracle.pools ALTER COLUMN total_creator_side_stake TYPE NUMERIC(78,0)`,
+      
+      // Change max_bettor_stake from bigint to numeric  
+      `ALTER TABLE oracle.pools ALTER COLUMN max_bettor_stake TYPE NUMERIC(78,0)`,
+      
+      // Change total_bettor_stake from bigint to numeric
+      `ALTER TABLE oracle.pools ALTER COLUMN total_bettor_stake TYPE NUMERIC(78,0)`,
+      
+      // Change total_stake from bigint to numeric
+      `ALTER TABLE oracle.pools ALTER COLUMN total_stake TYPE NUMERIC(78,0)`,
+      
+      // Add indexes for better performance
+      `CREATE INDEX IF NOT EXISTS idx_pools_market_id ON oracle.pools(market_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_pools_creator_address ON oracle.pools(creator_address)`,
+      `CREATE INDEX IF NOT EXISTS idx_pools_status ON oracle.pools(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pools_category ON oracle.pools(category)`,
+      `CREATE INDEX IF NOT EXISTS idx_pools_created_at ON oracle.pools(created_at)`
+    ];
+    
+    for (let i = 0; i < schemaFixes.length; i++) {
+      const fix = schemaFixes[i];
+      console.log(`📝 Applying fix ${i + 1}/${schemaFixes.length}: ${fix}`);
+      
+      try {
+        await db.query(fix);
+        console.log(`✅ Fix ${i + 1} applied successfully`);
+      } catch (error) {
+        if (error.message.includes('already exists')) {
+          console.log(`⚠️ Fix ${i + 1} already applied (index exists)`);
+        } else {
+          console.error(`❌ Fix ${i + 1} failed:`, error.message);
+        }
+      }
+    }
+    
+    console.log('\n🎉 Database schema fixes completed!');
+    
+    // Verify the changes
+    console.log('\n🔍 Verifying schema changes...');
+    const columns = await db.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'pools' AND table_schema = 'oracle' 
+      AND column_name IN ('total_creator_side_stake', 'max_bettor_stake', 'total_bettor_stake', 'total_stake')
+      ORDER BY column_name
+    `);
+    
+    console.log('📊 Updated column types:');
+    columns.rows.forEach(row => {
+      console.log(`   ${row.column_name}: ${row.data_type}`);
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fixing database schema:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+fixDatabaseSchema();

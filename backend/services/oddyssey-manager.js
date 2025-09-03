@@ -611,6 +611,185 @@ class OddysseyManager {
       throw error;
     }
   }
+
+  /**
+   * Check cycle synchronization status between DB and contract
+   */
+  async checkCycleSync() {
+    try {
+      console.log('🔄 Checking cycle synchronization status...');
+      
+      // Get current contract cycle
+      const contractCycleId = await this.oddysseyContract.dailyCycleId();
+      console.log(`📋 Contract cycle ID: ${contractCycleId}`);
+      
+      // Get current DB cycle
+      const dbCycleResult = await db.query(`
+        SELECT cycle_id, created_at, is_resolved
+        FROM oracle.oddyssey_cycles 
+        ORDER BY cycle_id DESC 
+        LIMIT 1
+      `);
+      
+      const dbCycle = dbCycleResult.rows[0];
+      console.log(`💾 DB cycle ID: ${dbCycle?.cycle_id || 'None'}`);
+      
+      const isSynced = dbCycle && contractCycleId && dbCycle.cycle_id === Number(contractCycleId);
+      
+      const syncStatus = {
+        dbCycleId: dbCycle?.cycle_id || 0,
+        contractCycleId: Number(contractCycleId) || 0,
+        isSynced,
+        dbCycleExists: !!dbCycle,
+        contractCycleExists: !!contractCycleId,
+        lastSyncCheck: new Date().toISOString()
+      };
+      
+      console.log(`✅ Cycle sync status: ${isSynced ? 'SYNCED' : 'OUT OF SYNC'}`);
+      console.log(`   DB: ${syncStatus.dbCycleId}, Contract: ${syncStatus.contractCycleId}`);
+      
+      return syncStatus;
+      
+    } catch (error) {
+      console.error('❌ Error checking cycle sync:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Force cycle synchronization (admin only)
+   */
+  async forceCycleSync() {
+    try {
+      console.log('🔧 Force cycle synchronization started...');
+      
+      const syncStatus = await this.checkCycleSync();
+      
+      if (syncStatus.isSynced) {
+        console.log('✅ Cycles already synced, no action needed');
+        return {
+          message: 'Cycles already synced',
+          syncedCycleId: syncStatus.contractCycleId
+        };
+      }
+      
+      // If contract cycle exists but DB doesn't, sync DB to contract
+      if (syncStatus.contractCycleExists && !syncStatus.dbCycleExists) {
+        console.log('📊 Syncing DB to existing contract cycle...');
+        await this.syncDbToContractCycle(syncStatus.contractCycleId);
+        return {
+          message: 'DB synced to contract cycle',
+          syncedCycleId: syncStatus.contractCycleId
+        };
+      }
+      
+      // If DB cycle exists but contract doesn't, this is a problem
+      if (syncStatus.dbCycleExists && !syncStatus.contractCycleExists) {
+        throw new Error('DB cycle exists without corresponding contract cycle - manual intervention required');
+      }
+      
+      // If both exist but are different, this is also a problem
+      if (syncStatus.dbCycleExists && syncStatus.contractCycleExists && !syncStatus.isSynced) {
+        throw new Error('DB and contract cycles are out of sync - manual intervention required');
+      }
+      
+      return {
+        message: 'No sync action needed',
+        syncedCycleId: 0
+      };
+      
+    } catch (error) {
+      console.error('❌ Error forcing cycle sync:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Sync database to match existing contract cycle
+   */
+  async syncDbToContractCycle(contractCycleId) {
+    try {
+      console.log(`🔄 Syncing DB to contract cycle ${contractCycleId}...`);
+      
+      // Get contract cycle matches
+      const contractMatches = await this.oddysseyContract.getDailyMatches(contractCycleId);
+      
+      // Get cycle end time from contract
+      const cycleEndTime = await this.oddysseyContract.dailyCycleEndTimes(contractCycleId);
+      
+      // Insert cycle into database
+      await db.query(`
+        INSERT INTO oracle.oddyssey_cycles (
+          cycle_id, created_at, updated_at, matches_count, 
+          matches_data, cycle_start_time, cycle_end_time, 
+          is_resolved, tx_hash
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (cycle_id) DO NOTHING
+      `, [
+        contractCycleId,
+        new Date(),
+        new Date(),
+        contractMatches.length,
+        JSON.stringify(contractMatches),
+        Date.now() / 1000,
+        Number(cycleEndTime),
+        false,
+        null // No tx hash for synced cycles
+      ]);
+      
+      console.log(`✅ Successfully synced DB to contract cycle ${contractCycleId}`);
+      
+    } catch (error) {
+      console.error(`❌ Error syncing DB to contract cycle ${contractCycleId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Start new daily cycle with retry logic and rollback
+   */
+  async startDailyCycleWithRetry(maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 Cycle creation attempt ${attempt}/${maxRetries}`);
+        const result = await this.startDailyCycle();
+        console.log(`✅ Cycle creation successful on attempt ${attempt}`);
+        return result;
+      } catch (error) {
+        console.error(`❌ Attempt ${attempt} failed:`, error);
+        
+        if (attempt === maxRetries) {
+          // Final attempt failed - send alert
+          await this.sendCycleCreationAlert(error);
+          throw error;
+        }
+        
+        // Wait before retry
+        console.log(`⏳ Waiting 30 seconds before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 30000));
+      }
+    }
+  }
+
+  /**
+   * Send cycle creation alert
+   */
+  async sendCycleCreationAlert(error) {
+    try {
+      console.error('🚨 CYCLE CREATION FAILED - SENDING ALERT');
+      console.error('Error details:', error.message);
+      
+      // You can implement webhook alerts here
+      // await this.sendWebhookAlert({
+      //   type: 'CYCLE_CREATION_FAILED',
+      //   message: `Cycle creation failed after all retries: ${error.message}`,
+      //   severity: 'HIGH'
+      // });
+      
+    } catch (alertError) {
+      console.error('❌ Failed to send cycle creation alert:', alertError);
+    }
+  }
 }
 
 module.exports = OddysseyManager; 

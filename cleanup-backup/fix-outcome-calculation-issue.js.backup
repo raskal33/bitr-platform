@@ -1,0 +1,202 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+class OutcomeCalculationFix {
+  constructor() {
+    this.sportmonksService = new (require('./services/sportmonks'))();
+  }
+
+  async run() {
+    console.log('🔧 Fixing Outcome Calculation Issue...\n');
+    
+    try {
+      // 1. Identify problematic matches
+      console.log('1️⃣ Identifying problematic matches...');
+      const problematicMatches = await this.identifyProblematicMatches();
+      
+      // 2. Clean up incorrect outcomes
+      console.log('\n2️⃣ Cleaning up incorrect outcomes...');
+      await this.cleanupIncorrectOutcomes(problematicMatches);
+      
+      // 3. Re-fetch actual scores
+      console.log('\n3️⃣ Re-fetching actual scores...');
+      await this.refetchActualScores(problematicMatches);
+      
+      // 4. Verify fixes
+      console.log('\n4️⃣ Verifying fixes...');
+      await this.verifyFixes();
+      
+      console.log('\n🎉 Outcome calculation fix completed!');
+      
+    } catch (error) {
+      console.error('❌ Error fixing outcome calculation:', error);
+    }
+  }
+
+  async identifyProblematicMatches() {
+    // Find matches that have outcomes but no scores
+    const problematicMatches = await db.query(`
+      SELECT 
+        f.id,
+        f.home_team,
+        f.away_team,
+        f.status,
+        f.match_date,
+        fr.result_1x2,
+        fr.result_ou25,
+        fr.home_score,
+        fr.away_score
+      FROM oracle.fixtures f
+      LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
+      WHERE f.status = 'FT'
+      AND fr.result_1x2 IS NOT NULL
+      AND fr.result_ou25 IS NOT NULL
+      AND (fr.home_score IS NULL OR fr.away_score IS NULL)
+      ORDER BY f.match_date DESC
+    `);
+
+    console.log(`📊 Found ${problematicMatches.rows.length} matches with outcomes but no scores:`);
+    problematicMatches.rows.forEach(match => {
+      console.log(`   ${match.id}: ${match.home_team} vs ${match.away_team} - Outcomes: ${match.result_1x2}/${match.result_ou25}, Score: ${match.home_score}-${match.away_score}`);
+    });
+
+    return problematicMatches.rows;
+  }
+
+  async cleanupIncorrectOutcomes(problematicMatches) {
+    if (problematicMatches.length === 0) {
+      console.log('✅ No problematic matches to clean up');
+      return;
+    }
+
+    const fixtureIds = problematicMatches.map(m => m.id);
+    
+    // Remove incorrect outcomes from fixture_results table
+    const deleteResult = await db.query(`
+      DELETE FROM oracle.fixture_results 
+      WHERE fixture_id = ANY($1)
+    `, [fixtureIds]);
+
+    console.log(`🗑️ Removed ${deleteResult.rowCount} incorrect outcome records`);
+
+    // Clean up result_info column in fixtures table
+    const updateResult = await db.query(`
+      UPDATE oracle.fixtures 
+      SET result_info = NULL 
+      WHERE id = ANY($1)
+    `, [fixtureIds]);
+
+    console.log(`🧹 Cleaned up result_info for ${updateResult.rowCount} fixtures`);
+  }
+
+  async refetchActualScores(problematicMatches) {
+    if (problematicMatches.length === 0) {
+      console.log('✅ No matches to re-fetch');
+      return;
+    }
+
+    const fixtureIds = problematicMatches.map(m => m.id);
+    console.log(`🔄 Re-fetching actual scores for ${fixtureIds.length} fixtures...`);
+
+    const results = await this.sportmonksService.fetchFixtureResults(fixtureIds);
+
+    if (results.length === 0) {
+      console.log('⚠️ No results fetched from API');
+      return;
+    }
+
+    // Save results with validation
+    let savedCount = 0;
+    for (const result of results) {
+      try {
+        // Validate that we have complete scores
+        if (result.home_score === null || result.away_score === null) {
+          console.log(`⚠️ Skipping incomplete result for fixture ${result.fixture_id}: ${result.home_score}-${result.away_score}`);
+          continue;
+        }
+
+        // Save to fixture_results table
+        await db.query(`
+          INSERT INTO oracle.fixture_results (
+            id, fixture_id, home_score, away_score, ht_home_score, ht_away_score,
+            result_1x2, result_ou25, finished_at, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
+          ON CONFLICT (fixture_id) DO UPDATE SET
+            home_score = EXCLUDED.home_score,
+            away_score = EXCLUDED.away_score,
+            ht_home_score = EXCLUDED.ht_home_score,
+            ht_away_score = EXCLUDED.ht_away_score,
+            result_1x2 = EXCLUDED.result_1x2,
+            result_ou25 = EXCLUDED.result_ou25,
+            finished_at = EXCLUDED.finished_at,
+            updated_at = NOW()
+        `, [
+          `result_${result.fixture_id}`,
+          result.fixture_id,
+          result.home_score,
+          result.away_score,
+          result.ht_home_score || null,
+          result.ht_away_score || null,
+          result.result_1x2,
+          result.result_ou25
+        ]);
+
+        // Also save to result_info column in fixtures table
+        await db.query(`
+          UPDATE oracle.fixtures 
+          SET result_info = $1, updated_at = NOW()
+          WHERE id = $2
+        `, [JSON.stringify(result), result.fixture_id]);
+
+        savedCount++;
+        console.log(`✅ Saved complete result for fixture ${result.fixture_id}: ${result.home_team} ${result.home_score}-${result.away_score} ${result.away_team}`);
+
+      } catch (error) {
+        console.error(`❌ Failed to save result for fixture ${result.fixture_id}:`, error.message);
+      }
+    }
+
+    console.log(`💾 Saved ${savedCount}/${results.length} complete results`);
+  }
+
+  async verifyFixes() {
+    // Check if we still have matches with outcomes but no scores
+    const remainingProblematic = await db.query(`
+      SELECT COUNT(*) as count
+      FROM oracle.fixtures f
+      LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
+      WHERE f.status = 'FT'
+      AND fr.result_1x2 IS NOT NULL
+      AND fr.result_ou25 IS NOT NULL
+      AND (fr.home_score IS NULL OR fr.away_score IS NULL)
+    `);
+
+    const count = parseInt(remainingProblematic.rows[0].count);
+    if (count === 0) {
+      console.log('✅ No matches with outcomes but no scores remaining');
+    } else {
+      console.log(`⚠️ Still have ${count} matches with outcomes but no scores`);
+    }
+
+    // Check Cycle 9 status
+    const cycle9Status = await db.query(`
+      SELECT 
+        COUNT(dgm.fixture_id) as total_matches,
+        COUNT(fr.fixture_id) as resolved_matches
+      FROM oracle.daily_game_matches dgm 
+      JOIN oracle.fixtures f ON dgm.fixture_id::VARCHAR = f.id::VARCHAR 
+      LEFT JOIN oracle.fixture_results fr ON dgm.fixture_id::VARCHAR = fr.fixture_id::VARCHAR 
+      WHERE dgm.cycle_id = 9
+    `);
+
+    if (cycle9Status.rows.length > 0) {
+      const cycle = cycle9Status.rows[0];
+      const resolutionRate = ((cycle.resolved_matches / cycle.total_matches) * 100).toFixed(1);
+      console.log(`📊 Cycle 9 status: ${cycle.resolved_matches}/${cycle.total_matches} matches resolved (${resolutionRate}%)`);
+    }
+  }
+}
+
+// Run the fix
+const fixer = new OutcomeCalculationFix();
+fixer.run();

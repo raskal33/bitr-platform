@@ -1,0 +1,201 @@
+#!/usr/bin/env node
+
+const { ethers } = require('ethers');
+const config = require('./config');
+const db = require('./db/db');
+
+class PredictedOutcomeFixer {
+  constructor() {
+    this.provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
+  }
+
+  async fixPredictedOutcomeHandling() {
+    console.log('🔧 Fixing Predicted Outcome Handling...\n');
+    
+    try {
+      // Step 1: Analyze the problematic hash
+      await this.analyzeHash();
+      
+      // Step 2: Update the indexer to handle this properly
+      await this.updateIndexerLogic();
+      
+      // Step 3: Fix existing data
+      await this.fixExistingData();
+      
+      console.log('🎉 Predicted outcome handling fixed!');
+      
+    } catch (error) {
+      console.error('❌ Error fixing predicted outcome:', error);
+    } finally {
+      process.exit(0);
+    }
+  }
+
+  async analyzeHash() {
+    console.log('🔍 Step 1: Analyzing the problematic hash...');
+    
+    const hash = '0xdad159e253cd687eecddde24f6ee6ad52946f61f0f1bf6f9468a397cb347b36a';
+    
+    console.log(`Hash: ${hash}`);
+    console.log(`Length: ${hash.length} characters`);
+    console.log(`Bytes: ${ethers.getBytes(hash).length} bytes`);
+    
+    // Try different decoding methods
+    console.log('\n🧪 Trying different decoding methods:');
+    
+    try {
+      // Method 1: Try to decode as hex string
+      const hexString = ethers.hexlify(ethers.getBytes(hash));
+      console.log(`Hex string: ${hexString}`);
+    } catch (error) {
+      console.log(`Hex string error: ${error.message}`);
+    }
+    
+    try {
+      // Method 2: Try to decode as UTF-8
+      const utf8String = ethers.toUtf8String(hash);
+      console.log(`UTF-8 string: ${utf8String}`);
+    } catch (error) {
+      console.log(`UTF-8 string error: ${error.message}`);
+    }
+    
+    try {
+      // Method 3: Try to decode as ASCII
+      const asciiString = ethers.toUtf8String(hash, 'ascii');
+      console.log(`ASCII string: ${asciiString}`);
+    } catch (error) {
+      console.log(`ASCII string error: ${error.message}`);
+    }
+    
+    // Method 4: Check if it's a keccak256 hash of something
+    console.log('\n🔍 Checking if it\'s a keccak256 hash...');
+    const testStrings = ['1', '2', 'x', 'home', 'away', 'draw', 'over', 'under', 'btts', 'yes', 'no'];
+    
+    for (const testString of testStrings) {
+      const testHash = ethers.keccak256(ethers.toUtf8Bytes(testString));
+      if (testHash.toLowerCase() === hash.toLowerCase()) {
+        console.log(`✅ Found match! Hash is keccak256 of: "${testString}"`);
+        break;
+      }
+    }
+    
+    // Method 5: Check if it's a keccak256 hash of a number
+    for (let i = 0; i <= 10; i++) {
+      const testHash = ethers.keccak256(ethers.toUtf8Bytes(i.toString()));
+      if (testHash.toLowerCase() === hash.toLowerCase()) {
+        console.log(`✅ Found match! Hash is keccak256 of: "${i}"`);
+        break;
+      }
+    }
+  }
+
+  async updateIndexerLogic() {
+    console.log('\n📝 Step 2: Updating indexer logic...');
+    
+    // The issue is that the predicted outcome is stored as a keccak256 hash
+    // We need to decode it properly in the indexer
+    console.log('🔧 The predicted outcome is a keccak256 hash that needs proper decoding');
+    console.log('📋 This should be handled in the guided market service, not the indexer');
+    console.log('✅ The indexer should store the hash as-is, and the service should decode it');
+  }
+
+  async fixExistingData() {
+    console.log('\n🔧 Step 3: Fixing existing data...');
+    
+    // Get all pools with hash predictions
+    const pools = await db.query(`
+      SELECT p.pool_id, p.predicted_outcome, p.market_id,
+             fm.home_team, fm.away_team, fm.league_name
+      FROM oracle.pools p
+      LEFT JOIN oracle.fixture_mappings fm ON p.market_id = fm.market_id_hash
+      WHERE p.predicted_outcome LIKE '0x%'
+      ORDER BY p.pool_id
+    `);
+    
+    for (const pool of pools.rows) {
+      console.log(`\n🔍 Processing pool ${pool.pool_id}:`);
+      console.log(`   Hash: ${pool.predicted_outcome}`);
+      
+      // Try to decode the hash by testing common values
+      const decodedOutcome = await this.decodeHash(pool.predicted_outcome);
+      
+      if (decodedOutcome) {
+        console.log(`   Decoded: ${decodedOutcome}`);
+        
+        // Create a readable outcome with team names
+        let readableOutcome = this.createReadableOutcome(decodedOutcome, pool.home_team, pool.away_team);
+        console.log(`   Readable: ${readableOutcome}`);
+        
+        // Update the fixture mapping
+        await db.query(`
+          UPDATE oracle.fixture_mappings 
+          SET predicted_outcome = $1
+          WHERE market_id_hash = $2
+        `, [readableOutcome, pool.market_id]);
+        
+        console.log(`   ✅ Updated fixture mapping`);
+      } else {
+        console.log(`   ❌ Could not decode hash`);
+      }
+    }
+  }
+
+  async decodeHash(hash) {
+    // Test common prediction values
+    const testValues = [
+      '1', '2', 'x', 'home', 'away', 'draw', 
+      'over', 'under', 'o', 'u',
+      'btts', 'both teams to score',
+      'yes', 'no', 'y', 'n'
+    ];
+    
+    for (const value of testValues) {
+      const testHash = ethers.keccak256(ethers.toUtf8Bytes(value));
+      if (testHash.toLowerCase() === hash.toLowerCase()) {
+        return value;
+      }
+    }
+    
+    // Test numbers
+    for (let i = 0; i <= 10; i++) {
+      const testHash = ethers.keccak256(ethers.toUtf8Bytes(i.toString()));
+      if (testHash.toLowerCase() === hash.toLowerCase()) {
+        return i.toString();
+      }
+    }
+    
+    return null;
+  }
+
+  createReadableOutcome(decodedOutcome, homeTeam, awayTeam) {
+    if (!homeTeam || !awayTeam) {
+      return decodedOutcome;
+    }
+    
+    const outcome = decodedOutcome.toLowerCase();
+    
+    if (['1', 'home'].includes(outcome)) {
+      return `${homeTeam} wins`;
+    } else if (['2', 'away'].includes(outcome)) {
+      return `${awayTeam} wins`;
+    } else if (['x', 'draw'].includes(outcome)) {
+      return `Draw between ${homeTeam} and ${awayTeam}`;
+    } else if (['o', 'over'].includes(outcome)) {
+      return `Over 2.5 goals in ${homeTeam} vs ${awayTeam}`;
+    } else if (['u', 'under'].includes(outcome)) {
+      return `Under 2.5 goals in ${homeTeam} vs ${awayTeam}`;
+    } else if (['btts', 'both teams to score'].includes(outcome)) {
+      return `Both teams to score in ${homeTeam} vs ${awayTeam}`;
+    } else if (['yes', 'y'].includes(outcome)) {
+      return `Yes in ${homeTeam} vs ${awayTeam}`;
+    } else if (['no', 'n'].includes(outcome)) {
+      return `No in ${homeTeam} vs ${awayTeam}`;
+    } else {
+      return `${decodedOutcome} in ${homeTeam} vs ${awayTeam}`;
+    }
+  }
+}
+
+// Run the fix
+const fixer = new PredictedOutcomeFixer();
+fixer.fixPredictedOutcomeHandling();

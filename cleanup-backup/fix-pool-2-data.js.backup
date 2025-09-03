@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+
+const { ethers } = require('ethers');
+const config = require('./config');
+const db = require('./db/db');
+
+async function fixPool2Data() {
+  try {
+    console.log('🔧 Fixing Pool 2 data...');
+    
+    // Initialize provider
+    const provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
+    
+    // Pool contract ABI (minimal for getting pool data)
+    const poolABI = [
+      "function pools(uint256) external view returns (address creator, uint16 odds, bool settled, bool creatorSideWon, bool isPrivate, bool usesBitr, bool filledAbove60, uint8 oracleType, uint256 creatorStake, uint256 totalCreatorSideStake, uint256 maxBettorStake, uint256 totalBettorStake, bytes32 predictedOutcome, bytes32 result, bytes32 marketId, uint256 eventStartTime, uint256 eventEndTime, uint256 bettingEndTime, uint256 resultTimestamp, uint256 arbitrationDeadline, string league, string category, string region, uint256 maxBetPerUser)"
+    ];
+    
+    const poolContract = new ethers.Contract(config.blockchain.contractAddresses.bitredictPool, poolABI, provider);
+    
+    // Get Pool 2 data from blockchain (pool ID 2 = index 1)
+    console.log('🔍 Fetching Pool 2 data from blockchain...');
+    const poolData = await poolContract.pools(1); // Pool ID 2 = index 1
+    
+    console.log('📋 Complete Pool 2 data from blockchain:');
+    console.log(`   Creator: ${poolData.creator}`);
+    console.log(`   Predicted Outcome: ${poolData.predictedOutcome}`);
+    console.log(`   Odds: ${Number(poolData.odds) / 100}`);
+    console.log(`   Creator Stake: ${ethers.formatEther(poolData.creatorStake)} ${poolData.usesBitr ? 'BITR' : 'STT'}`);
+    console.log(`   Uses BITR: ${poolData.usesBitr}`);
+    console.log(`   League: ${poolData.league}`);
+    console.log(`   Category: ${poolData.category}`);
+    console.log(`   Region: ${poolData.region}`);
+    console.log(`   Is Private: ${poolData.isPrivate}`);
+    console.log(`   Max Bet Per User: ${ethers.formatEther(poolData.maxBetPerUser)}`);
+    console.log(`   Total Creator Side Stake: ${ethers.formatEther(poolData.totalCreatorSideStake)}`);
+    console.log(`   Max Bettor Stake: ${ethers.formatEther(poolData.maxBettorStake)}`);
+    console.log(`   Total Bettor Stake: ${ethers.formatEther(poolData.totalBettorStake)}`);
+    console.log(`   Event Start Time: ${new Date(Number(poolData.eventStartTime) * 1000)}`);
+    console.log(`   Event End Time: ${new Date(Number(poolData.eventEndTime) * 1000)}`);
+    console.log(`   Betting End Time: ${new Date(Number(poolData.bettingEndTime) * 1000)}`);
+    console.log(`   Arbitration Deadline: ${new Date(Number(poolData.arbitrationDeadline) * 1000)}`);
+    
+    // Update the database with complete data
+    console.log('\n💾 Updating database with complete Pool 2 data...');
+    
+    // Convert large numbers to strings for numeric columns, and handle bigint limits
+    const creatorStake = poolData.creatorStake.toString();
+    const maxBetPerUser = poolData.maxBetPerUser.toString();
+    
+    // For bigint columns, we need to handle the size limit
+    // PostgreSQL bigint max value is 9223372036854775807
+    const maxBigInt = BigInt('9223372036854775807');
+    
+    let totalCreatorSideStake = poolData.totalCreatorSideStake;
+    let maxBettorStake = poolData.maxBettorStake;
+    
+    if (totalCreatorSideStake > maxBigInt) {
+      console.warn('⚠️ totalCreatorSideStake exceeds bigint limit, capping at max value');
+      totalCreatorSideStake = maxBigInt;
+    }
+    
+    if (maxBettorStake > maxBigInt) {
+      console.warn('⚠️ maxBettorStake exceeds bigint limit, capping at max value');
+      maxBettorStake = maxBigInt;
+    }
+    
+    await db.query(`
+      UPDATE oracle.pools SET
+        predicted_outcome = $1,
+        odds = $2,
+        creator_stake = $3,
+        league = $4,
+        category = $5,
+        region = $6,
+        is_private = $7,
+        max_bet_per_user = $8,
+        use_bitr = $9,
+        total_creator_side_stake = $10,
+        max_bettor_stake = $11,
+        total_bettor_stake = $12,
+        betting_end_time = $13,
+        arbitration_deadline = $14,
+        updated_at = NOW()
+      WHERE pool_id = '2'
+    `, [
+      poolData.predictedOutcome,
+      Number(poolData.odds),
+      creatorStake, // numeric column can handle large numbers
+      poolData.league || null,
+      poolData.category || null,
+      poolData.region || null,
+      poolData.isPrivate,
+      maxBetPerUser, // numeric column can handle large numbers
+      poolData.usesBitr,
+      totalCreatorSideStake.toString(), // bigint column
+      maxBettorStake.toString(), // bigint column
+      poolData.totalBettorStake.toString(),
+      poolData.bettingEndTime.toString(),
+      poolData.arbitrationDeadline.toString()
+    ]);
+    
+    console.log('✅ Pool 2 data updated successfully!');
+    
+    // Verify the update
+    const updatedPool = await db.query('SELECT * FROM oracle.pools WHERE pool_id = 2');
+    console.log('\n📊 Updated Pool 2 data in database:');
+    console.log(`   Predicted Outcome: ${updatedPool.rows[0].predicted_outcome}`);
+    console.log(`   Odds: ${updatedPool.rows[0].odds}`);
+    console.log(`   Creator Stake: ${updatedPool.rows[0].creator_stake}`);
+    console.log(`   League: ${updatedPool.rows[0].league}`);
+    console.log(`   Category: ${updatedPool.rows[0].category}`);
+    console.log(`   Uses BITR: ${updatedPool.rows[0].use_bitr}`);
+    
+  } catch (error) {
+    console.error('❌ Error fixing Pool 2 data:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+fixPool2Data();

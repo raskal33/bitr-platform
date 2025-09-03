@@ -1,30 +1,23 @@
 {
   "contract": "BitredictPool",
-  "address": "0x6C9DCB0F967fbAc62eA82d99BEF8870b4272919a",
+  "address": "0xBe9ad7A4CA367d45E61Fc20BbC5C44230e83E9f3",
   "network": "somnia",
-  "chainId": 50312,
+  "chainId": "50312",
   "deployer": "0x483fc7FD690dCf2a01318282559C389F385d4428",
-  "bitrToken": "0x4b10fBFFDEE97C42E29899F47A2ECD30a38dBf2C",
+  "bitrToken": "0xe10e734b6d475f4004C354CA5086CA7968efD4fd",
   "feeCollector": "0x483fc7FD690dCf2a01318282559C389F385d4428",
-  "guidedOracle": "0x2103cCfc9a15F2876765487F594481D5f8EC160a",
-  "optimisticOracle": "0x9E53d44aD3f614BA53F3B21EDF9fcE79a72238b2",
+  "guidedOracle": "0x9F91C01bB21385ac9959a1d51e33E65515688DC8",
+  "optimisticOracle": "0x114832D788b27c530deCe033c72286927036e7CF",
   "creationFeeSTT": "1.0",
   "creationFeeBITR": "50.0",
   "minPoolStakeSTT": "5.0",
   "minPoolStakeBITR": "1000.0",
-  "deploymentTime": "2025-01-27T12:00:00.000Z",
-  "gasPrice": "8 gwei",
+  "deploymentTime": "2025-08-29T21:20:29.680Z",
+  "gasPrice": "5.0 gwei",
   "constructorArgs": [
-    "0x4b10fBFFDEE97C42E29899F47A2ECD30a38dBf2C",
+    "0xe10e734b6d475f4004C354CA5086CA7968efD4fd",
     "0x483fc7FD690dCf2a01318282559C389F385d4428",
-    "0x2103cCfc9a15F2876765487F594481D5f8EC160a",
-    "0x9E53d44aD3f614BA53F3B21EDF9fcE79a72238b2"
-  ],
-  "features": {
-    "oddsRange": "1.01 to 100.00",
-    "automaticSettlement": "Fixed",
-    "sportMonksCompatibility": "Enabled",
-    "separateFees": "STT: 1, BITR: 50",
-    "separateStakes": "STT: 5, BITR: 1000"
-  }
+    "0x9F91C01bB21385ac9959a1d51e33E65515688DC8",
+    "0x114832D788b27c530deCe033c72286927036e7CF"
+  ]
 }

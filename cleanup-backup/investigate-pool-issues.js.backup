@@ -1,0 +1,64 @@
+#!/usr/bin/env node
+
+const db = require('./db/db');
+
+async function investigatePoolIssues() {
+  try {
+    console.log('🔍 Investigating Pool Data Issues...\n');
+    
+    // Check Pool 2 data
+    console.log('📊 Pool 2 Database Data:');
+    const pool2Data = await db.query('SELECT pool_id, predicted_outcome, league, category, market_id FROM oracle.pools WHERE pool_id = 2');
+    console.log(JSON.stringify(pool2Data.rows[0], null, 2));
+    
+    // Check all fixture mappings
+    console.log('\n🏟️ All Fixture Mappings:');
+    const fixtureMappings = await db.query('SELECT market_id_hash, home_team, away_team, league_name, predicted_outcome FROM oracle.fixture_mappings');
+    fixtureMappings.rows.forEach((mapping, index) => {
+      console.log(`\nMapping ${index + 1}:`);
+      console.log(JSON.stringify(mapping, null, 2));
+    });
+    
+    // Check if Pool 2's market has a fixture mapping
+    const pool2Market = pool2Data.rows[0].market_id;
+    console.log(`\n🔍 Looking for fixture mapping for Pool 2 market: ${pool2Market}`);
+    
+    const pool2Fixture = await db.query('SELECT * FROM oracle.fixture_mappings WHERE market_id_hash = $1', [pool2Market]);
+    
+    if (pool2Fixture.rows.length > 0) {
+      console.log('✅ Found fixture mapping for Pool 2:');
+      console.log(JSON.stringify(pool2Fixture.rows[0], null, 2));
+    } else {
+      console.log('❌ No fixture mapping found for Pool 2 market');
+      
+      // Check if there are any fixture mappings that might match
+      const allMappings = await db.query('SELECT market_id_hash FROM oracle.fixture_mappings');
+      console.log('\n📋 Available market IDs in fixture mappings:');
+      allMappings.rows.forEach(row => {
+        console.log(`   ${row.market_id_hash}`);
+      });
+    }
+    
+    // Check the guided market service to see how it processes data
+    console.log('\n🔧 Checking how guided market service processes data...');
+    const guidedMarketService = require('./services/guided-market-service');
+    
+    // Test the decodePredictedOutcome function
+    const testHash = pool2Data.rows[0].predicted_outcome;
+    console.log(`\n🧪 Testing decodePredictedOutcome with hash: ${testHash}`);
+    
+    try {
+      const decoded = await guidedMarketService.decodePredictedOutcome(testHash);
+      console.log('Decoded result:', decoded);
+    } catch (error) {
+      console.log('Decode error:', error.message);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error investigating pool issues:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+investigatePoolIssues();

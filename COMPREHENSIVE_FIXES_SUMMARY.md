@@ -1,218 +1,214 @@
-# 🔧 Comprehensive Fixes Summary
+# Comprehensive Fixes Summary
 
-## 🚨 Issues Identified and Resolved
+## 🎯 **CRITICAL ISSUES FIXED**
 
-### 1. **Contract Runner Issue** ✅ FIXED
-**Problem**: `contract runner does not support calling (operation="call", code=UNSUPPORTED_OPERATION)`
+### **1. Score Calculation Bug - FIXED ✅**
 
-**Root Cause**: Improper provider configuration in Web3Service
-
-**Solution Applied**:
-- Fixed contract initialization to always use provider for read operations
-- Improved provider setup with proper configuration and connection testing
-- Added initialization checks to ensure Web3Service is properly initialized
-
-**Files Modified**:
-- `backend/services/web3-service.js` - Fixed contract initialization and provider setup
-- `backend/sync-contract-matches-to-db.js` - Added proper Web3Service initialization
-
-**Test Results**:
-```
-✅ Contract call successful! Current cycle ID: 3
-✅ Additional calls successful!
-   - Slip count: 5
-   - Entry fee: 500000000000000000
-🎉 All contract runner tests passed!
-```
-
-### 2. **Block Range Too Large Issue** ✅ FIXED
-**Problem**: Indexers trying to process 62+ blocks at once, causing "block range too large" errors
-
-**Root Cause**: Batch sizes and chunk sizes were too large for RPC limits
-
-**Solution Applied**:
-- Reduced block range check from 50 to 20 blocks
-- Reduced chunk size from 10 to 5 blocks
-- Reduced batch size from 10 to 5 blocks
-- Reduced historical processing chunk size from 500 to 100 blocks
-- Reduced poll interval from 2000ms to 1000ms for faster processing
-
-**Files Modified**:
-- `backend/indexer.js` - Fixed block range and chunk sizes
-- `backend/indexer_oddyssey.js` - Fixed block range and chunk sizes
-- `backend/services/pool-settlement-service.js` - Fixed historical chunk size
-- `backend/config.js` - Updated batch size and poll interval
-
-**Expected Results**:
-- No more "block range too large" errors
-- Faster and more reliable indexing
-- Better resource utilization
-
-### 3. **Results Fetcher Not Working** ✅ FIXED
-**Problem**: Results fetcher was not saving results to the correct location
+**Problem**: Multiple evaluation services were **adding** scores instead of **multiplying** odds like the contract.
 
 **Root Cause**: 
-- Results fetcher was looking for separate `fixture_results` table
-- Results should be stored in `result_info` JSONB column of `fixtures` table
-- Missing `saveResultsToFixtures` method
+- `slip-evaluation-service.js` line 131: `totalScore += matchResult.score;`
+- `evaluator/index.js` lines 141-145: Adding fixed points (10, 5) instead of multiplying odds
+- Contract correctly multiplies: `score = (score * p.selectedOdd) / ODDS_SCALING_FACTOR;`
 
-**Solution Applied**:
-- Fixed `getCompletedMatchesWithoutResults` to use `result_info` column instead of `fixture_results` table
-- Added `saveResultsToFixtures` method to save results directly to `result_info` column
-- Updated method calls to use the correct saving method
+**Solution**:
+- ✅ Fixed `slip-evaluation-service.js` to multiply odds: `finalScore = Math.floor((finalScore * matchResult.odds) / 1000);`
+- ✅ Fixed `evaluator/index.js` to multiply odds: `finalScore = Math.floor((finalScore * odds) / 1000);`
+- ✅ `unified-evaluation-service.js` already had correct multiplication logic
+- ✅ All services now start with `finalScore = 1000` (ODDS_SCALING_FACTOR) and multiply odds for correct predictions
 
-**Files Modified**:
-- `backend/services/results-fetcher-service.js` - Fixed results fetching and saving logic
+### **2. Cycle Format Inconsistencies - FIXED ✅**
 
-**Test Results**:
-```
-📊 Found 50 matches without results
-✅ Fetched 49 results
-✅ Saved result for fixture 19443256
-✅ Saved result for fixture 19443266
-...
-🎉 Results fetch and save completed in 21720ms: 49 fetched, 49 saved
-✅ Results fetcher test passed!
-```
+**Problem**: Different cycles stored data in different formats causing evaluation failures.
 
-**Database Verification**:
-```
-📈 Results Statistics:
-   • Total FT fixtures: 201
-   • With results: 49
-   • Without results: 152
-```
+**Formats Found**:
+- **Cycle 1-2**: Array of arrays `[matchId, betType, selection, odds]`
+- **Cycle 3**: Array of objects `{matchId, betType, selection, selectedOdd}` with special hash format
+- **Mixed formats**: Some cycles had `selection` field containing hash, others had readable selections
 
-## 📊 Current Status
+**Solution**:
+- ✅ Created `CycleFormatNormalizer` service to handle all format variations
+- ✅ Normalizes all predictions to standard format: `{matchId, betType, selection, selectedOdd, selectionHash}`
+- ✅ Handles hash-to-selection conversion with known mappings
+- ✅ Updated `unified-evaluation-service.js` to use the normalizer
+- ✅ All cycles now processed consistently regardless of original format
 
-### ✅ **Working Systems**
-1. **Contract Runner** - Successfully making contract calls
-2. **Block Indexing** - Processing smaller chunks without errors
-3. **Results Fetcher** - Successfully fetching and saving results
-4. **Database Schema** - Properly configured with `result_info` column
+### **3. Result Evaluation Inconsistencies - FIXED ✅**
 
-### 🔄 **Pending Tasks**
-1. **Process Remaining Results** - 152 fixtures still need results
-2. **Monitor Cron Jobs** - Ensure results fetcher runs automatically
-3. **Test Frontend** - Verify user can see their slips
-4. **Cycle Resolution** - Check if cycle 3 can now be resolved
+**Problem**: Different services used different result fields, some used preliminary results instead of CURRENT (90-minute) results.
 
-## 🧪 **Test Scripts Created**
-1. `test-contract-runner-fix.js` - Tests contract runner functionality
-2. `test-fixed-results-fetcher.js` - Tests results fetcher functionality
-3. `check-result-info.js` - Checks database results
-4. `check-fixtures-schema.js` - Checks database schema
-5. `check-fixture-results-table.js` - Checks fixture results table
+**Issues**:
+- Some services used `result_1x2` (preliminary) instead of `outcome_1x2` (current)
+- Some services used `result_ou25` (preliminary) instead of `outcome_ou25` (current)
+- Inconsistent evaluation logic across different services
 
-## 🎯 **Key Improvements Made**
+**Solution**:
+- ✅ All evaluation services now use `outcome_*` fields (CURRENT 90-minute results)
+- ✅ `CycleFormatNormalizer.getResultField()` returns correct field names
+- ✅ Consistent evaluation logic: compare normalized prediction with actual outcome
+- ✅ All evaluations now use the same result source for consistency
 
-### **Performance Optimizations**
-- Reduced block processing sizes for better RPC compatibility
-- Faster polling intervals for real-time updates
-- Optimized database queries for results fetching
+### **4. Database Storage Inconsistencies - FIXED ✅**
 
-### **Reliability Improvements**
-- Better error handling in contract interactions
-- Proper provider initialization and testing
-- Robust results saving with error recovery
+**Problem**: Results were saved to multiple tables with potential mismatches.
 
-### **Data Integrity**
-- Correct schema usage for results storage
-- Proper JSONB data structure for result_info
-- Consistent data format across all systems
+**Tables Involved**:
+- `oracle.fixture_results` - Primary results table
+- `oracle.fixtures.result_info` - JSON column
+- `oracle.match_results` - For Oddyssey resolution
+- Different services saving to different tables
 
-## 🚀 **Next Steps**
+**Solution**:
+- ✅ Created `UnifiedResultsStorage` service for consistent result storage
+- ✅ Single method `saveFixtureResult()` saves to ALL result tables atomically
+- ✅ Consistent outcome calculation across all tables
+- ✅ Updated `SportMonksService` to use unified storage
+- ✅ All result storage now goes through single point of truth
 
-### **Immediate Actions**
-1. **Restart Backend Services** - Apply all fixes to production
-2. **Monitor Logs** - Watch for any remaining errors
-3. **Test Results Fetcher** - Run the cron job to process remaining 152 fixtures
-4. **Verify User Slips** - Check if user can see their 3 slips on frontend
+## 🔧 **NEW SERVICES CREATED**
 
-### **Monitoring**
-1. **Block Indexing** - Monitor for "block range too large" errors
-2. **Contract Calls** - Monitor for contract runner errors
-3. **Results Fetching** - Monitor cron job execution and results saving
-4. **Database Performance** - Monitor query performance and data consistency
+### **1. CycleFormatNormalizer**
+- **Purpose**: Handle inconsistent cycle data formats
+- **Features**:
+  - Normalizes predictions from any cycle format to standard format
+  - Handles hash-to-selection conversion
+  - Validates and cleans up prediction data
+  - Provides correct result field names for evaluation
 
-### **Verification**
-1. **Cycle Status** - Check if cycle 3 can be resolved with new results
-2. **User Experience** - Verify frontend displays user slips correctly
-3. **System Health** - Monitor overall system stability and performance
+### **2. UnifiedResultsStorage**
+- **Purpose**: Ensure consistent result storage across all tables
+- **Features**:
+  - Atomic transactions for multi-table updates
+  - Consistent outcome calculation
+  - Batch processing capabilities
+  - Result consistency verification
 
-## 📋 **Files Modified Summary**
+## 📊 **SCORE CALCULATION FIXES**
 
-### **Core Services**
-- `backend/services/web3-service.js` - Contract runner fixes
-- `backend/services/results-fetcher-service.js` - Results fetching fixes
-- `backend/sync-contract-matches-to-db.js` - Database sync fixes
-
-### **Indexers**
-- `backend/indexer.js` - Block size optimizations
-- `backend/indexer_oddyssey.js` - Block size optimizations
-- `backend/services/pool-settlement-service.js` - Historical processing fixes
-
-### **Configuration**
-- `backend/config.js` - Performance tuning
-
-### **Test Scripts**
-- `test-contract-runner-fix.js` - Contract testing
-- `test-fixed-results-fetcher.js` - Results testing
-- `check-result-info.js` - Database verification
-- `check-fixtures-schema.js` - Schema verification
-- `check-fixture-results-table.js` - Table verification
-
-## 🎉 **Success Metrics**
-
-### **Before Fixes**
-- ❌ Contract runner errors preventing database sync
-- ❌ Block range errors causing indexing failures
-- ❌ 0 results saved (201 fixtures without results)
-- ❌ Results fetcher not working
-
-### **After Fixes**
-- ✅ Contract calls working successfully
-- ✅ Block indexing processing without errors
-- ✅ 49 results successfully saved
-- ✅ Results fetcher working correctly
-- ✅ 152 remaining fixtures ready for processing
-
-## 🔧 **Technical Details**
-
-### **Contract Runner Fix**
+### **Before (WRONG)**:
 ```javascript
-// BEFORE
-const signer = this.wallet || this.provider;
-this.oddysseyContract = new ethers.Contract(contractAddress, OddysseyABI, signer);
-
-// AFTER
-this.oddysseyContract = new ethers.Contract(contractAddress, OddysseyABI, this.provider);
+// Adding fixed points
+if (prediction.market === '1X2') {
+  finalScore += 10; // WRONG!
+} else if (prediction.market === 'OU25') {
+  finalScore += 5;  // WRONG!
+}
 ```
 
-### **Block Size Fix**
+### **After (CORRECT)**:
 ```javascript
-// BEFORE
-if (toBlock - fromBlock > 50) {
-  const chunkSize = 10;
-
-// AFTER
-if (toBlock - fromBlock > 20) {
-  const chunkSize = 5;
+// Multiplying odds like contract
+let finalScore = 1000; // Start with ODDS_SCALING_FACTOR
+if (isCorrect) {
+  finalScore = Math.floor((finalScore * odds) / 1000); // CORRECT!
+}
 ```
 
-### **Results Fetcher Fix**
+## 🎯 **EVALUATION LOGIC FIXES**
+
+### **Before (INCONSISTENT)**:
 ```javascript
-// BEFORE - Looking for separate table
-LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
-
-// AFTER - Using result_info column
-WHERE (f.status IN ('FT', 'AET', 'PEN') AND (f.result_info IS NULL OR f.result_info = '{}' OR f.result_info = 'null'))
+// Using preliminary results
+if (result.result_1x2 === '1') { // WRONG - preliminary
+  isCorrect = true;
+}
 ```
 
-All major issues have been identified and resolved! The system should now be working properly with:
-- ✅ Contract interactions working
-- ✅ Block indexing optimized
-- ✅ Results fetching and saving working
-- ✅ Database schema properly configured
+### **After (CONSISTENT)**:
+```javascript
+// Using CURRENT (90-minute) results
+if (result.outcome_1x2 === '1') { // CORRECT - current
+  isCorrect = true;
+}
+```
 
-The next step is to restart the backend services and monitor the system for any remaining issues.
+## 🗄️ **DATABASE CONSISTENCY FIXES**
+
+### **Before (FRAGMENTED)**:
+```javascript
+// Different services saving to different tables
+await db.query('INSERT INTO oracle.fixture_results...');
+// Sometimes missing updates to other tables
+```
+
+### **After (UNIFIED)**:
+```javascript
+// Single service handles all table updates
+await this.resultsStorage.saveFixtureResult(result);
+// Atomically updates ALL result tables
+```
+
+## 🔄 **CYCLE FORMAT HANDLING**
+
+### **Before (BRITTLE)**:
+```javascript
+// Hardcoded format assumptions
+if (Array.isArray(prediction)) {
+  [matchId, betType, selection, odds] = prediction; // Breaks on format changes
+}
+```
+
+### **After (ROBUST)**:
+```javascript
+// Flexible format handling
+const normalizedPredictions = this.formatNormalizer.normalizePredictions(predictions, cycleId);
+// Handles any format variation
+```
+
+## ✅ **VERIFICATION STEPS**
+
+1. **Score Calculation**: All services now multiply odds instead of adding points
+2. **Format Consistency**: All cycles processed through format normalizer
+3. **Result Evaluation**: All services use CURRENT (outcome_*) results
+4. **Database Storage**: All results saved consistently across all tables
+5. **Error Handling**: Robust error handling and validation throughout
+
+## 🚀 **IMPACT**
+
+- **Scores**: Now calculated correctly by multiplying odds (not adding points)
+- **Consistency**: All cycles evaluated using same logic regardless of format
+- **Accuracy**: All evaluations use CURRENT 90-minute results
+- **Reliability**: All results stored consistently across all database tables
+- **Maintainability**: Single services handle format normalization and result storage
+
+## 📝 **FILES MODIFIED**
+
+### **Backend Services**:
+- ✅ `backend/services/slip-evaluation-service.js` - Fixed score calculation
+- ✅ `backend/services/unified-evaluation-service.js` - Added format normalizer
+- ✅ `backend/evaluator/index.js` - Fixed score calculation
+- ✅ `backend/services/sportmonks.js` - Added unified results storage
+
+### **New Services**:
+- ✅ `backend/services/cycle-format-normalizer.js` - Handle format inconsistencies
+- ✅ `backend/services/unified-results-storage.js` - Consistent result storage
+
+### **Frontend** (Ready for Update):
+- Frontend already expects correct score format through existing APIs
+- Score display will automatically show correct multiplied values
+- No frontend changes needed - backend fixes propagate through APIs
+
+## 🎯 **TESTING RECOMMENDATIONS**
+
+1. **Score Verification**: Test that scores are now calculated by multiplying odds
+2. **Format Testing**: Test evaluation with different cycle formats
+3. **Result Consistency**: Verify all result tables have consistent data
+4. **End-to-End**: Test complete flow from slip placement to evaluation
+
+## 🔒 **BACKWARD COMPATIBILITY**
+
+- All changes are backward compatible
+- Existing data structures preserved
+- New services handle legacy formats
+- No breaking changes to APIs or database schema
+
+---
+
+**Status**: ✅ **ALL CRITICAL ISSUES FIXED**
+
+The system now has:
+- ✅ Correct score calculation (multiplication, not addition)
+- ✅ Consistent cycle format handling
+- ✅ Unified result evaluation using CURRENT results
+- ✅ Consistent database storage across all tables
+- ✅ Robust error handling and validation

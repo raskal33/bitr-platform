@@ -15,10 +15,10 @@ async function main() {
   const network = await provider.getNetwork();
   console.log("🌐 Network:", network.name, "(Chain ID:", network.chainId, ")");
 
-  // Contract parameters
-  const BITR_TOKEN_ADDRESS = "0x4b10fBFFDEE97C42E29899F47A2ECD30a38dBf2C";
-  const GUIDED_ORACLE_ADDRESS = "0x2103cCfc9a15F2876765487F594481D5f8EC160a";
-  const OPTIMISTIC_ORACLE_ADDRESS = "0x9E53d44aD3f614BA53F3B21EDF9fcE79a72238b2";
+  // Contract parameters - Updated to match .env file
+  const BITR_TOKEN_ADDRESS = "0xe10e734b6d475f4004C354CA5086CA7968efD4fd";
+  const GUIDED_ORACLE_ADDRESS = "0x9F91C01bB21385ac9959a1d51e33E65515688DC8";
+  const OPTIMISTIC_ORACLE_ADDRESS = "0x114832D788b27c530deCe033c72286927036e7CF";
   
   console.log("\n🔗 Contract addresses:");
   console.log("  - BITR Token:", BITR_TOKEN_ADDRESS);
@@ -98,7 +98,8 @@ async function main() {
   console.log("\n📄 Deployment info saved to bitredictpool-deployment-info.json");
   require('fs').writeFileSync(
     'bitredictpool-deployment-info.json',
-    JSON.stringify(deploymentInfo, null, 2)
+    JSON.stringify(deploymentInfo, (key, value) =>
+      typeof value === 'bigint' ? value.toString() : value, 2)
   );
 
   console.log("\n🎉 BitredictPool deployment completed successfully!");

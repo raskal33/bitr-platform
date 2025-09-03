@@ -24,6 +24,7 @@ class UnifiedResultsCron {
     this.runCount = 0;
     this.errorCount = 0;
     this.job = null;
+    this.currentRun = null;
   }
 
   /**
@@ -59,6 +60,18 @@ class UnifiedResultsCron {
       console.log('🛑 Received SIGINT, stopping Unified Results Cron...');
       this.stop();
     });
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (error) => {
+      console.error('❌ Uncaught Exception in Unified Results Cron:', error);
+      this.cleanup();
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('❌ Unhandled Rejection in Unified Results Cron:', reason);
+      this.cleanup();
+    });
+
     console.log('🔄 Replaces: results-fetcher, coordinated-results-scheduler, fixture-status-updater, football-scheduler-results');
   }
 
@@ -66,7 +79,14 @@ class UnifiedResultsCron {
    * Run the unified results cycle
    */
   async runUnifiedCycle() {
+    // Prevent overlapping runs
+    if (this.currentRun) {
+      console.log('⚠️ Unified Results cycle already running, skipping...');
+      return;
+    }
+
     const startTime = Date.now();
+    this.currentRun = Date.now();
     
     try {
       console.log('🔄 Starting Unified Results cycle...');
@@ -90,6 +110,8 @@ class UnifiedResultsCron {
     } catch (error) {
       console.error('❌ Error in Unified Results cycle:', error);
       this.errorCount++;
+    } finally {
+      this.currentRun = null;
     }
   }
 
@@ -108,6 +130,7 @@ class UnifiedResultsCron {
     return {
       isInitialized: this.isInitialized,
       isRunning: this.unifiedManager.isRunning,
+      currentRun: this.currentRun,
       lastRun: this.lastRun,
       runCount: this.runCount,
       errorCount: this.errorCount,
@@ -124,7 +147,18 @@ class UnifiedResultsCron {
       this.job = null;
     }
     this.isInitialized = false;
+    this.cleanup();
     console.log('✅ Unified Results Cron job stopped');
+  }
+
+  /**
+   * Cleanup resources
+   */
+  cleanup() {
+    if (this.unifiedManager) {
+      this.unifiedManager.cleanup();
+    }
+    this.currentRun = null;
   }
 }
 

@@ -19,7 +19,7 @@ module.exports = {
     chainId: process.env.CHAIN_ID || 50312,
     privateKey: process.env.PRIVATE_KEY,
     contractAddresses: {
-      bitredictPool: process.env.BITREDICT_POOL_ADDRESS || '0x5a66a41b884aF70d5671b322C3e6ac1346CC885C',
+      bitredictPool: process.env.BITREDICT_POOL_ADDRESS || '0xBe9ad7A4CA367d45E61Fc20BbC5C44230e83E9f3',
       guidedOracle: process.env.GUIDED_ORACLE_ADDRESS || '0x9F91C01bB21385ac9959a1d51e33E65515688DC8',
       optimisticOracle: process.env.OPTIMISTIC_ORACLE_ADDRESS || '0x114832D788b27c530deCe033c72286927036e7CF',
       reputationSystem: process.env.REPUTATION_SYSTEM_ADDRESS || '0x94DBC95350AaCcC9DeAbdd9cf60B189a149636C7',
@@ -135,8 +135,8 @@ module.exports = {
 
   // Indexer configuration
   indexer: {
-    startBlock: process.env.START_BLOCK || 'latest',
-    batchSize: process.env.BATCH_SIZE || 1, // Process only 1 block at a time
+    startBlock: process.env.START_BLOCK || '164312555', // Start from recent block instead of 0
+    batchSize: process.env.BATCH_SIZE || 200, // Optimized batch size for better performance
     pollInterval: process.env.POLL_INTERVAL || 2000, // 2 seconds for polling
     confirmationBlocks: process.env.CONFIRMATION_BLOCKS || 12, // 12 confirmation blocks for security
     maxRetries: process.env.MAX_RETRIES || 3,

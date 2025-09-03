@@ -129,7 +129,7 @@ class SlipEvaluator {
         console.log(`📊 Slip ${slipId} has ${predictions.length} predictions`);
 
         let correctCount = 0;
-        let finalScore = 0;
+        let finalScore = 1000; // Start with ODDS_SCALING_FACTOR like contract
 
         // Evaluate each prediction
         for (const prediction of predictions) {
@@ -137,13 +137,15 @@ class SlipEvaluator {
           
           if (isCorrect) {
             correctCount++;
-            // Add points based on prediction type
-            if (prediction.market === '1X2') {
-              finalScore += 10; // 10 points for correct moneyline
-            } else if (prediction.market === 'OU25') {
-              finalScore += 5;  // 5 points for correct over/under
-            }
+            // FIXED: Multiply odds instead of adding fixed points
+            const odds = prediction.selectedOdd || prediction.odds || 1000;
+            finalScore = Math.floor((finalScore * odds) / 1000);
           }
+        }
+        
+        // Set score to 0 if no correct predictions
+        if (correctCount === 0) {
+          finalScore = 0;
         }
 
         // Update slip with evaluation results

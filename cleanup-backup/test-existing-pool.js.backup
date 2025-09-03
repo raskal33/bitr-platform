@@ -1,0 +1,65 @@
+const GuidedMarketService = require('./services/guided-market-service');
+
+async function testExistingPool() {
+  console.log('🧪 Testing existing pool in database...\n');
+  
+  const guidedMarketService = new GuidedMarketService();
+  
+  try {
+    // Test with the existing pool data from the database
+    console.log('1. Testing with existing pool data...');
+    
+    const existingPoolData = {
+      poolId: 0,
+      marketId: "0x901bdc5f4d068cf089f3cf69dc6c391d67394cef9001d2d619dfebd0aad2edf4",
+      predictedOutcome: "0xdad159e253cd687eecddde24f6ee6ad52946f61f0f1bf6f9468a397cb347b36a",
+      category: "football",
+      odds: 150
+    };
+    
+    console.log('Pool Data:', existingPoolData);
+    console.log('');
+    
+    // Test the decodePredictedOutcome method with the existing pool data
+    const result = await guidedMarketService.decodePredictedOutcome(
+      existingPoolData.predictedOutcome,
+      existingPoolData.category,
+      existingPoolData.odds,
+      existingPoolData.marketId
+    );
+    
+    console.log('Decoded Result:', result);
+    console.log('');
+    
+    // Test the getPoolInfo method to see the full pool information
+    console.log('2. Testing getPoolInfo method...');
+    
+    const poolInfo = await guidedMarketService.getPoolInfo(existingPoolData.poolId);
+    
+    if (poolInfo) {
+      console.log('Pool Info:');
+      console.log(`  Pool ID: ${poolInfo.poolId}`);
+      console.log(`  Creator: ${poolInfo.creator}`);
+      console.log(`  Predicted Outcome: ${poolInfo.predictedOutcome}`);
+      console.log(`  Home Team: ${poolInfo.homeTeam}`);
+      console.log(`  Away Team: ${poolInfo.awayTeam}`);
+      console.log(`  Bet Market Type: ${poolInfo.betMarketType}`);
+      console.log(`  Odds: ${poolInfo.odds}x`);
+      console.log(`  Category: ${poolInfo.category}`);
+      console.log(`  Market ID: ${poolInfo.marketId}`);
+      console.log(`  League: ${poolInfo.league}`);
+      console.log(`  Event Start: ${poolInfo.eventStartTime}`);
+    } else {
+      console.log('❌ Pool info not found');
+    }
+    
+    console.log('');
+    console.log('✅ Existing pool test completed!');
+    
+  } catch (error) {
+    console.error('❌ Error testing existing pool:', error.message);
+  }
+}
+
+// Run the test
+testExistingPool();

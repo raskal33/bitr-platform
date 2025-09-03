@@ -187,55 +187,115 @@ class OddysseyMatchSelector {
         priorityScore += 10;
       }
       
-      // League priority scoring
+      // ENHANCED: League priority scoring with country names
       const leagueName = fixture.league_name || '';
+      const countryName = fixture.country || '';
+      
+      // Create full league name with country
+      const fullLeagueName = countryName ? 
+        `${countryName} ${leagueName}` : 
+        leagueName;
+      
+      // Check if it's a priority league
       const isPriorityLeague = this.priorityLeagues.some(priority => 
-        leagueName.toLowerCase().includes(priority.toLowerCase())
+        fullLeagueName.toLowerCase().includes(priority.toLowerCase())
       );
       
       if (isPriorityLeague) {
-        priorityScore += 50;
+        priorityScore += 50; // High priority for country-specific leagues
         
         // Extra points for top-tier leagues
-        if (leagueName.includes('Premier League') || leagueName.includes('La Liga') || 
-            leagueName.includes('Bundesliga') || leagueName.includes('Serie A')) {
-          priorityScore += 20;
+        if (fullLeagueName.includes('England Premier League') || 
+            fullLeagueName.includes('Spain La Liga') || 
+            fullLeagueName.includes('Germany Bundesliga') || 
+            fullLeagueName.includes('Italy Serie A')) {
+          priorityScore += 30;
         }
         
         // Extra points for international competitions
-        if (leagueName.includes('Champions League') || leagueName.includes('Europa League') ||
-            leagueName.includes('Libertadores') || leagueName.includes('Sudamericana')) {
-          priorityScore += 30;
+        if (fullLeagueName.includes('UEFA Champions League') || 
+            fullLeagueName.includes('UEFA Europa League') ||
+            fullLeagueName.includes('Copa Libertadores')) {
+          priorityScore += 40;
+        }
+      } else {
+        // PENALTY: Non-priority leagues get negative points
+        priorityScore -= 20;
+        
+        // EXTRA PENALTY: Generic league names without country
+        if (leagueName === 'Premier League' || 
+            leagueName === 'Serie A' || 
+            leagueName === 'La Liga' || 
+            leagueName === 'Bundesliga') {
+          priorityScore -= 30; // Heavy penalty for generic names
+          console.log(`⚠️ Generic league name detected: ${leagueName} (${fixture.home_team} vs ${fixture.away_team})`);
         }
       }
       
       // Penalty for friendlies
       if (leagueName.toLowerCase().includes('friendly')) {
-        priorityScore -= 30;
-      }
-      
-      // Penalty for youth leagues
-      if (leagueName.toLowerCase().includes('youth') || leagueName.toLowerCase().includes('u19') ||
-          leagueName.toLowerCase().includes('u18') || leagueName.toLowerCase().includes('u17')) {
         priorityScore -= 50;
       }
       
+      // Time preference (prefer matches between 15:00-21:00 UTC)
+      const matchHour = new Date(fixture.match_date).getUTCHours();
+      if (matchHour >= 15 && matchHour <= 21) {
+        priorityScore += 10;
+      }
+      
+      // Odds quality scoring
+      if (homeOdds && drawOdds && awayOdds) {
+        // Prefer competitive matches
+        const maxOdd = Math.max(homeOdds, drawOdds, awayOdds);
+        const minOdd = Math.min(homeOdds, drawOdds, awayOdds);
+        const oddsBalance = minOdd / maxOdd;
+        priorityScore += oddsBalance * 20; // 0-20 points for balance
+        
+        // Prefer reasonable odds range
+        const avgOdd = (homeOdds + drawOdds + awayOdds) / 3;
+        if (avgOdd >= 1.2 && avgOdd <= 5.0) {
+          priorityScore += 15;
+        }
+      }
+      
+      // Add small random factor for variety
+      priorityScore += Math.random() * 5;
+      
       return {
         ...fixture,
-        priority_score: priorityScore
+        priorityScore,
+        fullLeagueName,
+        isPriorityLeague
       };
     });
     
-    // Sort by priority score and select top matches
-    const sortedFixtures = scoredFixtures
-      .filter(fixture => fixture.priority_score > 0) // Only consider fixtures with positive scores
-      .sort((a, b) => b.priority_score - a.priority_score);
+    // Sort by priority score (highest first)
+    scoredFixtures.sort((a, b) => b.priorityScore - a.priorityScore);
     
-    const selected = sortedFixtures.slice(0, count);
+    // Log selection details
+    console.log(`📊 League selection analysis for ${scoredFixtures.length} fixtures:`);
+    const priorityCount = scoredFixtures.filter(f => f.isPriorityLeague).length;
+    const genericCount = scoredFixtures.filter(f => 
+      f.league_name === 'Premier League' || 
+      f.league_name === 'Serie A' || 
+      f.league_name === 'La Liga' || 
+      f.league_name === 'Bundesliga'
+    ).length;
     
-    console.log(`📈 Selection quality for ${selected.length} matches:`);
-    console.log(`   Average priority score: ${(selected.reduce((sum, f) => sum + f.priority_score, 0) / selected.length).toFixed(1)}`);
-    console.log(`   Matches with odds: ${selected.filter(f => f.odds_data && f.odds_data.home).length}/${selected.length}`);
+    console.log(`  • Priority leagues: ${priorityCount}/${scoredFixtures.length}`);
+    console.log(`  • Generic league names: ${genericCount}/${scoredFixtures.length}`);
+    
+    // Select top matches
+    const selected = scoredFixtures.slice(0, count);
+    
+    // Log selected matches
+    console.log(`\n🎯 Selected ${selected.length} matches:`);
+    selected.forEach((match, index) => {
+      const status = match.isPriorityLeague ? '✅ PRIORITY' : '⚠️ NON-PRIORITY';
+      console.log(`  ${index + 1}. ${match.home_team} vs ${match.away_team}`);
+      console.log(`     League: ${match.fullLeagueName} (${status})`);
+      console.log(`     Score: ${match.priorityScore.toFixed(1)}`);
+    });
     
     return selected;
   }

@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+
+const db = require('./db/db');
+
+async function checkPoolData() {
+  try {
+    console.log('🔍 Checking Pool 2 data...');
+    
+    // Check pool data
+    const poolResult = await db.query('SELECT * FROM oracle.pools WHERE pool_id = 2');
+    console.log('\n📊 Pool Data:');
+    console.log(JSON.stringify(poolResult.rows[0], null, 2));
+    
+    // Check fixture mapping
+    const marketId = '0xdfb92ad18d8d18cd35b16a9dc7742b66f54ef362de1390616b90ceb3fb36d8ee';
+    const fixtureResult = await db.query('SELECT * FROM oracle.fixture_mappings WHERE market_id_hash = $1', [marketId]);
+    
+    console.log('\n🏟️ Fixture Mapping:');
+    if (fixtureResult.rows.length > 0) {
+      console.log(JSON.stringify(fixtureResult.rows[0], null, 2));
+    } else {
+      console.log('❌ No fixture mapping found for this market ID');
+    }
+    
+    // Check if there are any fixture mappings at all
+    const allFixtures = await db.query('SELECT COUNT(*) as count FROM oracle.fixture_mappings');
+    console.log(`\n📈 Total fixture mappings in database: ${allFixtures.rows[0].count}`);
+    
+    // Check recent fixture mappings
+    const recentFixtures = await db.query('SELECT * FROM oracle.fixture_mappings ORDER BY created_at DESC LIMIT 3');
+    console.log('\n🕒 Recent fixture mappings:');
+    recentFixtures.rows.forEach((fixture, index) => {
+      console.log(`${index + 1}. ${fixture.home_team} vs ${fixture.away_team} (${fixture.market_id_hash})`);
+    });
+    
+  } catch (error) {
+    console.error('❌ Error:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+checkPoolData();

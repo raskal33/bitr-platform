@@ -170,6 +170,7 @@ class BitredictAPI {
 
     // Pool routes - handled by modular pools.js router
     this.app.get('/api/pools', this.getPools.bind(this));
+    this.app.get('/api/pools/:id/user-bet', this.getUserBetStatus.bind(this));
 
     // User routes
     this.app.get('/api/users/:address', this.getUserProfile.bind(this));
@@ -834,6 +835,58 @@ class BitredictAPI {
       bets: [],
       total: 0
     };
+  }
+
+  async getUserBetStatus(req, res) {
+    try {
+      const { id: poolId } = req.params;
+      const { address } = req.query;
+
+      if (!address) {
+        return res.status(400).json({
+          success: false,
+          error: 'User address is required'
+        });
+      }
+
+      if (!poolId || isNaN(poolId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid pool ID is required'
+        });
+      }
+
+      // Query the database for user bets on this pool
+      const db = require('../db/db');
+      const result = await db.query(`
+        SELECT 
+          COALESCE(SUM(amount), 0) as total_bet_amount,
+          COUNT(*) as bet_count,
+          MAX(created_at) as last_bet_date
+        FROM oracle.pool_bets 
+        WHERE pool_id = $1 AND user_address = $2
+      `, [poolId, address]);
+
+      const hasBet = result.rows.length > 0 && result.rows[0].bet_count > 0;
+      const betData = result.rows[0] || {};
+
+      res.json({
+        success: true,
+        data: {
+          hasBet,
+          betAmount: hasBet ? parseFloat(betData.total_bet_amount || 0) : 0,
+          betCount: hasBet ? parseInt(betData.bet_count || 0) : 0,
+          lastBetDate: hasBet ? betData.last_bet_date : null
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error getting user bet status:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get user bet status'
+      });
+    }
   }
 
   async queryUserPools(address, options) {

@@ -1,0 +1,265 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+class StatusUpdateCircularDependencyFix {
+  constructor() {
+    this.sportmonksService = new (require('./services/sportmonks'))();
+  }
+
+  async run() {
+    console.log('🔧 Fixing Status Update Circular Dependency Issue...\n');
+    
+    try {
+      // 1. Identify matches stuck in INPLAY status that should be finished
+      console.log('1️⃣ Identifying matches stuck in INPLAY status...');
+      const stuckMatches = await this.identifyStuckMatches();
+      
+      // 2. Update status for stuck matches by checking SportMonks API
+      console.log('\n2️⃣ Updating status for stuck matches...');
+      await this.updateStuckMatchesStatus(stuckMatches);
+      
+      // 3. Fetch results for newly finished matches
+      console.log('\n3️⃣ Fetching results for newly finished matches...');
+      await this.fetchResultsForNewlyFinishedMatches();
+      
+      // 4. Fix the getCompletedMatchesWithoutResults logic
+      console.log('\n4️⃣ Fixing the result fetching logic...');
+      await this.fixResultFetchingLogic();
+      
+      // 5. Verify fixes
+      console.log('\n5️⃣ Verifying fixes...');
+      await this.verifyFixes();
+      
+      console.log('\n🎉 Status update circular dependency fix completed!');
+      
+    } catch (error) {
+      console.error('❌ Error fixing status update circular dependency:', error);
+    }
+  }
+
+  async identifyStuckMatches() {
+    // Find matches that are in INPLAY status but should be finished based on time
+    // A match should be finished if it started more than 130 minutes ago (90 min + 40 min buffer)
+    const stuckMatches = await db.query(`
+      SELECT 
+        f.id,
+        f.home_team,
+        f.away_team,
+        f.status,
+        f.match_date,
+        f.starting_at,
+        EXTRACT(EPOCH FROM (NOW() - f.match_date))/60 as minutes_since_start
+      FROM oracle.fixtures f
+      WHERE f.status LIKE '%INPLAY%'
+      AND f.match_date < NOW() - INTERVAL '130 minutes'
+      ORDER BY f.match_date DESC
+      LIMIT 50
+    `);
+
+    console.log(`📊 Found ${stuckMatches.rows.length} matches stuck in INPLAY status:`);
+    stuckMatches.rows.forEach(match => {
+      console.log(`   ${match.id}: ${match.home_team} vs ${match.away_team} (${match.status}) - ${Math.round(match.minutes_since_start)} min ago`);
+    });
+
+    return stuckMatches.rows;
+  }
+
+  async updateStuckMatchesStatus(stuckMatches) {
+    if (stuckMatches.length === 0) {
+      console.log('✅ No stuck matches to update');
+      return;
+    }
+
+    let updatedCount = 0;
+    
+    for (const match of stuckMatches) {
+      try {
+        console.log(`🔄 Checking status for ${match.home_team} vs ${match.away_team}...`);
+        
+        // Fetch current status from SportMonks API
+        const response = await this.sportmonksService.axios.get(`/fixtures/${match.id}`, {
+          params: {
+            'api_token': this.sportmonksService.apiToken,
+            'include': 'state'
+          }
+        });
+
+        if (response.data.data) {
+          const fixtureData = response.data.data;
+          const currentStatus = fixtureData.state?.state || 'NS';
+          
+          if (currentStatus !== match.status) {
+            // Update status in database
+            await db.query(`
+              UPDATE oracle.fixtures 
+              SET status = $1, updated_at = NOW() 
+              WHERE id = $2
+            `, [currentStatus, match.id]);
+            
+            console.log(`✅ Updated ${match.id}: ${match.status} → ${currentStatus}`);
+            updatedCount++;
+          } else {
+            console.log(`ℹ️ ${match.id}: Status unchanged (${currentStatus})`);
+          }
+        }
+        
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 250));
+        
+      } catch (error) {
+        console.error(`❌ Failed to update status for ${match.id}:`, error.message);
+      }
+    }
+
+    console.log(`📊 Updated status for ${updatedCount}/${stuckMatches.length} matches`);
+  }
+
+  async fetchResultsForNewlyFinishedMatches() {
+    // Get matches that are now finished but don't have results
+    const finishedWithoutResults = await db.query(`
+      SELECT 
+        f.id,
+        f.home_team,
+        f.away_team,
+        f.status,
+        f.match_date
+      FROM oracle.fixtures f
+      LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
+      WHERE f.status IN ('FT', 'AET', 'PEN', 'FT_PEN')
+      AND fr.fixture_id IS NULL
+      AND f.match_date < NOW() - INTERVAL '30 minutes'
+      ORDER BY f.match_date DESC
+      LIMIT 20
+    `);
+
+    if (finishedWithoutResults.rows.length === 0) {
+      console.log('✅ No newly finished matches without results');
+      return;
+    }
+
+    console.log(`🔄 Fetching results for ${finishedWithoutResults.rows.length} newly finished matches...`);
+
+    const fixtureIds = finishedWithoutResults.rows.map(f => f.id);
+    const results = await this.sportmonksService.fetchFixtureResults(fixtureIds);
+
+    if (results.length === 0) {
+      console.log('⚠️ No results fetched from API');
+      return;
+    }
+
+    // Save results with validation
+    let savedCount = 0;
+    for (const result of results) {
+      try {
+        // Validate that we have complete scores
+        if (result.home_score === null || result.away_score === null) {
+          console.log(`⚠️ Skipping incomplete result for fixture ${result.fixture_id}: ${result.home_score}-${result.away_score}`);
+          continue;
+        }
+
+        // Save to fixture_results table
+        await db.query(`
+          INSERT INTO oracle.fixture_results (
+            id, fixture_id, home_score, away_score, ht_home_score, ht_away_score,
+            result_1x2, result_ou25, finished_at, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
+          ON CONFLICT (fixture_id) DO UPDATE SET
+            home_score = EXCLUDED.home_score,
+            away_score = EXCLUDED.away_score,
+            ht_home_score = EXCLUDED.ht_home_score,
+            ht_away_score = EXCLUDED.ht_away_score,
+            result_1x2 = EXCLUDED.result_1x2,
+            result_ou25 = EXCLUDED.result_ou25,
+            finished_at = EXCLUDED.finished_at,
+            updated_at = NOW()
+        `, [
+          `result_${result.fixture_id}`,
+          result.fixture_id,
+          result.home_score,
+          result.away_score,
+          result.ht_home_score || null,
+          result.ht_away_score || null,
+          result.result_1x2,
+          result.result_ou25
+        ]);
+
+        // Also save to result_info column in fixtures table
+        await db.query(`
+          UPDATE oracle.fixtures 
+          SET result_info = $1, updated_at = NOW()
+          WHERE id = $2
+        `, [JSON.stringify(result), result.fixture_id]);
+
+        savedCount++;
+        console.log(`✅ Saved result for fixture ${result.fixture_id}: ${result.home_team} ${result.home_score}-${result.away_score} ${result.away_team}`);
+
+      } catch (error) {
+        console.error(`❌ Failed to save result for fixture ${result.fixture_id}:`, error.message);
+      }
+    }
+
+    console.log(`💾 Saved ${savedCount}/${results.length} results for newly finished matches`);
+  }
+
+  async fixResultFetchingLogic() {
+    console.log('🔧 The result fetching logic needs to be updated in SportMonks service...');
+    console.log('📝 Key changes needed:');
+    console.log('   1. getCompletedMatchesWithoutResults should also check matches by time');
+    console.log('   2. Regular status updates should run independently of result fetching');
+    console.log('   3. Status updates should happen more frequently for in-progress matches');
+    
+    // The actual fix will be applied to the SportMonks service
+    console.log('✅ Logic analysis completed - fixes will be applied to SportMonks service');
+  }
+
+  async verifyFixes() {
+    // Check Cycle 9 status after fixes
+    const cycle9Status = await db.query(`
+      SELECT 
+        COUNT(dgm.fixture_id) as total_matches,
+        COUNT(fr.fixture_id) as resolved_matches
+      FROM oracle.daily_game_matches dgm 
+      JOIN oracle.fixtures f ON dgm.fixture_id::VARCHAR = f.id::VARCHAR 
+      LEFT JOIN oracle.fixture_results fr ON dgm.fixture_id::VARCHAR = fr.fixture_id::VARCHAR 
+      WHERE dgm.cycle_id = 9
+    `);
+
+    if (cycle9Status.rows.length > 0) {
+      const cycle = cycle9Status.rows[0];
+      const resolutionRate = ((cycle.resolved_matches / cycle.total_matches) * 100).toFixed(1);
+      console.log(`📊 Cycle 9 status after fixes: ${cycle.resolved_matches}/${cycle.total_matches} matches resolved (${resolutionRate}%)`);
+    }
+
+    // Check for remaining stuck matches
+    const remainingStuck = await db.query(`
+      SELECT COUNT(*) as count
+      FROM oracle.fixtures f
+      WHERE f.status LIKE '%INPLAY%'
+      AND f.match_date < NOW() - INTERVAL '130 minutes'
+    `);
+
+    const stuckCount = parseInt(remainingStuck.rows[0].count);
+    if (stuckCount === 0) {
+      console.log('✅ No matches remaining stuck in INPLAY status');
+    } else {
+      console.log(`⚠️ Still have ${stuckCount} matches stuck in INPLAY status`);
+    }
+
+    // Check specific LASK Linz match
+    const laskStatus = await db.query(`
+      SELECT f.status, fr.home_score, fr.away_score
+      FROM oracle.fixtures f
+      LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
+      WHERE f.id = '19434271'
+    `);
+
+    if (laskStatus.rows.length > 0) {
+      const lask = laskStatus.rows[0];
+      console.log(`🎯 LASK Linz match status: ${lask.status}, Score: ${lask.home_score}-${lask.away_score}`);
+    }
+  }
+}
+
+// Run the fix
+const fixer = new StatusUpdateCircularDependencyFix();
+fixer.run();

@@ -1,0 +1,57 @@
+const db = require('./db/db');
+
+async function createFixtureMappingTable() {
+  try {
+    console.log('🔧 Creating fixture mapping table...');
+    
+    // Check if the table already exists
+    const checkTableQuery = `
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'oracle' 
+        AND table_name = 'fixture_mappings'
+    `;
+    
+    const checkResult = await db.query(checkTableQuery);
+    
+    if (checkResult.rows.length > 0) {
+      console.log('✅ fixture_mappings table already exists');
+      return;
+    }
+    
+    // Create the fixture mappings table
+    const createTableQuery = `
+      CREATE TABLE oracle.fixture_mappings (
+        id SERIAL PRIMARY KEY,
+        market_id_hash VARCHAR(66) NOT NULL,
+        fixture_id VARCHAR(50) NOT NULL,
+        home_team VARCHAR(255),
+        away_team VARCHAR(255),
+        league_name VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(market_id_hash)
+      )
+    `;
+    
+    await db.query(createTableQuery);
+    console.log('✅ Created fixture_mappings table');
+    
+    // Add indexes for better performance
+    const addIndexesQuery = `
+      CREATE INDEX idx_fixture_mappings_market_id ON oracle.fixture_mappings(market_id_hash);
+      CREATE INDEX idx_fixture_mappings_fixture_id ON oracle.fixture_mappings(fixture_id);
+    `;
+    
+    await db.query(addIndexesQuery);
+    console.log('✅ Added indexes to fixture_mappings table');
+    
+    console.log('✅ Fixture mapping table creation completed!');
+    
+  } catch (error) {
+    console.error('❌ Error creating fixture mapping table:', error.message);
+    throw error;
+  }
+}
+
+// Run the migration
+createFixtureMappingTable();

@@ -291,8 +291,14 @@ class EnhancedBitredictIndexer {
           );
 
           for (const event of betPlacedEvents) {
-            await this.handleBetPlaced(event);
-            this.healthStats.totalEvents++;
+            // CRITICAL FIX: Check transaction success before processing event
+            const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+            if (receipt && receipt.status === 1) {
+              await this.handleBetPlaced(event);
+              this.healthStats.totalEvents++;
+            } else {
+              console.warn(`⚠️ Skipping BetPlaced event from failed transaction: ${event.transactionHash}`);
+            }
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -314,8 +320,14 @@ class EnhancedBitredictIndexer {
           );
 
           for (const event of poolSettledEvents) {
-            await this.handlePoolSettled(event);
-            this.healthStats.totalEvents++;
+            // CRITICAL FIX: Check transaction success before processing event
+            const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+            if (receipt && receipt.status === 1) {
+              await this.handlePoolSettled(event);
+              this.healthStats.totalEvents++;
+            } else {
+              console.warn(`⚠️ Skipping PoolSettled event from failed transaction: ${event.transactionHash}`);
+            }
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -370,8 +382,14 @@ class EnhancedBitredictIndexer {
           );
 
           for (const event of outcomeEvents) {
-            await this.handleOutcomeSubmitted(event);
-            this.healthStats.totalEvents++;
+            // CRITICAL FIX: Check transaction success before processing event
+            const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+            if (receipt && receipt.status === 1) {
+              await this.handleOutcomeSubmitted(event);
+              this.healthStats.totalEvents++;
+            } else {
+              console.warn(`⚠️ Skipping OutcomeSubmitted event from failed transaction: ${event.transactionHash}`);
+            }
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -408,8 +426,14 @@ class EnhancedBitredictIndexer {
             );
 
             for (const event of events) {
-              await this.handleOddysseyEvent(event, eventType);
-              this.healthStats.totalEvents++;
+              // CRITICAL FIX: Check transaction success before processing event
+              const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+              if (receipt && receipt.status === 1) {
+                await this.handleOddysseyEvent(event, eventType);
+                this.healthStats.totalEvents++;
+              } else {
+                console.warn(`⚠️ Skipping ${eventType} event from failed transaction: ${event.transactionHash}`);
+              }
             }
           } catch (error) {
             if (error.message && error.message.includes('block range exceeds')) {
@@ -443,8 +467,14 @@ class EnhancedBitredictIndexer {
             );
 
             for (const event of events) {
-              await this.handleReputationEvent(event, eventType);
-              this.healthStats.totalEvents++;
+              // CRITICAL FIX: Check transaction success before processing event
+              const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+              if (receipt && receipt.status === 1) {
+                await this.handleReputationEvent(event, eventType);
+                this.healthStats.totalEvents++;
+              } else {
+                console.warn(`⚠️ Skipping ${eventType} event from failed transaction: ${event.transactionHash}`);
+              }
             }
           } catch (error) {
             if (error.message && error.message.includes('block range exceeds')) {

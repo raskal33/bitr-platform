@@ -208,6 +208,49 @@ class OddysseyResultsResolver {
    * Get match result from our database
    */
   async getResultFromDatabase(fixtureId) {
+    // First try to get from match_results table (preferred for Oddyssey)
+    const matchResult = await db.query(`
+      SELECT 
+        mr.match_id as fixture_id,
+        mr.home_score,
+        mr.away_score,
+        mr.outcome_1x2,
+        mr.outcome_ou25,
+        mr.resolved_at,
+        f.home_team,
+        f.away_team,
+        f.league_name,
+        f.status
+      FROM oracle.match_results mr
+      LEFT JOIN oracle.fixtures f ON mr.match_id::VARCHAR = f.id::VARCHAR
+      WHERE mr.match_id = $1
+    `, [fixtureId]);
+
+    if (matchResult.rows.length > 0) {
+      const match = matchResult.rows[0];
+      const hasScores = match.home_score !== null && match.away_score !== null;
+      const hasOutcomes = match.outcome_1x2 !== null && match.outcome_ou25 !== null;
+      const isFinished = ['FT', 'AET', 'PEN', 'FT_PEN'].includes(match.status);
+      
+      const isResolved = isFinished && hasScores && hasOutcomes;
+
+      return {
+        fixtureId: match.fixture_id,
+        homeTeam: match.home_team,
+        awayTeam: match.away_team,
+        league: match.league_name,
+        status: match.status,
+        isResolved: isResolved,
+        homeScore: match.home_score,
+        awayScore: match.away_score,
+        score: hasScores ? `${match.home_score}-${match.away_score}` : null,
+        result1x2: match.outcome_1x2,
+        resultOU25: match.outcome_ou25,
+        finishedAt: match.resolved_at
+      };
+    }
+
+    // Fallback to fixture_results table
     const result = await db.query(`
       SELECT 
         f.id as fixture_id,
@@ -234,16 +277,15 @@ class OddysseyResultsResolver {
     }
 
     const match = result.rows[0];
-    // FIXED: Check if match is resolved based on status AND outcomes, not just scores
-    // Many matches have outcomes calculated without explicit scores (especially 0-0 draws)
+    // FIXED: A match is only resolved if it has BOTH scores AND outcomes
+    // This prevents the issue where matches have outcomes but no scores
     const hasScores = match.home_score !== null && match.away_score !== null;
     const hasOutcomes = match.result_1x2 !== null && match.result_ou25 !== null;
     const isFinished = ['FT', 'AET', 'PEN', 'FT_PEN'].includes(match.status);
     
     // A match is resolved if:
-    // 1. It's finished AND has outcomes calculated, OR
-    // 2. It has both scores (for explicit score matches)
-    const isResolved = (isFinished && hasOutcomes) || hasScores;
+    // 1. It's finished AND has BOTH scores AND outcomes
+    const isResolved = isFinished && hasScores && hasOutcomes;
 
     return {
       fixtureId: match.fixture_id,

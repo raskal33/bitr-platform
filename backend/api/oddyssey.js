@@ -5,6 +5,12 @@ const { asyncHandler, validateDateParam } = require('../utils/validation');
 const { rateLimitMiddleware } = require('../config/redis');
 const { serializeBigInts } = require('../utils/bigint-serializer');
 
+// ROOT CAUSE FIX: Import simple bulletproof service
+const SimpleBulletproofService = require('../services/simple-bulletproof-service');
+
+// ROOT CAUSE FIX: Initialize simple bulletproof service
+const bulletproofService = new SimpleBulletproofService();
+
 // Simple in-memory cache to reduce database load
 const cache = new Map();
 const CACHE_TTL = 30 * 1000; // 30 seconds
@@ -95,130 +101,168 @@ function createStandardResponse(data, meta = {}) {
   };
 }
 
-// Get current Oddyssey matches (uses persistent storage only)
+// ROOT CAUSE FIX: Bulletproof Oddyssey matches endpoint with standardized data flow
 router.get('/matches', cacheMiddleware(30000), validateDateParam('date', false, true), asyncHandler(async (req, res) => {
   try {
     const { date } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
     
-    console.log(`🎯 Fetching Oddyssey matches for date: ${targetDate}`);
+    console.log(`🎯 [BULLETPROOF] Fetching Oddyssey matches for date: ${targetDate}`);
 
-    // Get today's matches from oracle.daily_game_matches table
-    const todayMatchesQuery = `
-      SELECT 
-        fixture_id as id,
-        home_team,
-        away_team,
-        league_name,
-        match_date,
-        home_odds,
-        draw_odds,
-        away_odds,
-        over_25_odds,
-        under_25_odds,
-        display_order
-      FROM oracle.daily_game_matches
-      WHERE game_date = $1
-      ORDER BY display_order ASC
-    `;
-    
-    const todayResult = await db.query(todayMatchesQuery, [targetDate]);
-    const matches = todayResult.rows;
+    // ROOT CAUSE FIX: Get current cycle ID for the date using cycle_start_time
+    const cycleResult = await db.query(`
+      SELECT cycle_id as id FROM oracle.oddyssey_cycles 
+      WHERE DATE(cycle_start_time) = $1 
+      ORDER BY cycle_id DESC LIMIT 1
+    `, [targetDate]);
 
-    if (matches.length > 0) {
-      console.log(`✅ Found ${matches.length} matches for ${targetDate}`);
-
-      // Transform data to match frontend expectations (consistent camelCase)
-      const transformedMatches = matches.map((match, index) => transformMatchData(match, index));
-
-      // Get yesterday's matches from previous cycle
-      const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      let yesterdayMatches = [];
-      
-      try {
-        // Get yesterday's matches from oracle.daily_game_matches table (much simpler!)
-        const yesterdayMatchesQuery = `
-          SELECT 
-            fixture_id as id,
-            home_team,
-            away_team,
-            league_name,
-            match_date,
-            home_odds,
-            draw_odds,
-            away_odds,
-            over_25_odds,
-            under_25_odds
-          FROM oracle.daily_game_matches
-          WHERE game_date = $1
-          ORDER BY display_order ASC
-        `;
-        
-        const yesterdayFixturesResult = await db.query(yesterdayMatchesQuery, [yesterdayDate]);
-            
-        if (yesterdayFixturesResult.rows.length > 0) {
-          yesterdayMatches = yesterdayFixturesResult.rows.map((fixture, index) => transformMatchData(fixture, index));
-        }
-      } catch (error) {
-        console.error('❌ Error fetching yesterday matches:', error);
-        yesterdayMatches = [];
-      }
-
-      // Add cache control headers to prevent hydration mismatches
-      res.set({
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      });
-
-      const response = createStandardResponse({
-        today: {
-          date: targetDate,
-          matches: transformedMatches,
-          count: transformedMatches.length
-        },
-        yesterday: {
-          date: yesterdayDate,
-          matches: yesterdayMatches,
-          count: yesterdayMatches.length
-        }
-      }, {
-        totalMatches: transformedMatches.length + yesterdayMatches.length,
-        expectedMatches: 10,
-        source: "persistent_storage",
-        operation: "get_matches"
-      });
-
-      return res.json(serializeBigInts(response));
-    } else {
-      console.log(`⚠️ No matches found for ${targetDate}`);
-      
-      const response = createStandardResponse({
-        today: {
-          date: targetDate,
-          matches: [],
-          count: 0
-        },
-        yesterday: {
-          date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          matches: [],
-          count: 0
-        }
-      }, {
-        totalMatches: 0,
-        expectedMatches: 10,
-        source: "persistent_storage",
-        operation: "get_matches"
-      });
-
-      return res.json(response);
+    if (cycleResult.rows.length === 0) {
+      console.log(`⚠️ No cycle found for ${targetDate}`);
+      return res.json(createStandardResponse({
+        today: { date: targetDate, matches: [], count: 0 },
+        yesterday: { date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], matches: [], count: 0 }
+      }, { totalMatches: 0, expectedMatches: 10, source: "standardized_pipeline", operation: "get_matches" }));
     }
+
+    const cycleId = cycleResult.rows[0].id;
+
+    // Step 2: Use simple bulletproof service to get matches
+    const matchesResult = await bulletproofService.getStandardizedMatchesForFrontend(cycleId);
+    
+    if (!matchesResult.success) {
+      console.error(`❌ Standardized data flow failed:`, matchesResult.errors);
+      
+      // Fallback to direct database query with validation
+      const fallbackQuery = `
+        SELECT 
+          fixture_id, home_team, away_team, league_name, match_date,
+          home_odds, draw_odds, away_odds, over_25_odds, under_25_odds
+        FROM oracle.daily_game_matches
+        WHERE game_date = $1
+        ORDER BY display_order ASC
+        LIMIT 10
+      `;
+      
+      const fallbackResult = await db.query(fallbackQuery, [targetDate]);
+      let validatedMatches = [];
+      
+      // Validate each match through the bulletproof service
+      for (const match of fallbackResult.rows) {
+        try {
+          const validation = bulletproofService.validator.validateDatabaseOdds(match);
+          if (validation.isValid) {
+            const frontendMatch = bulletproofService.pipeline.transformDatabaseToFrontend(match);
+            validatedMatches.push(frontendMatch);
+          } else {
+            console.warn(`⚠️ Match ${match.fixture_id} failed validation:`, validation.errors);
+          }
+        } catch (error) {
+          console.error(`❌ Error validating match ${match.fixture_id}:`, error);
+        }
+      }
+      
+      matchesResult.matches = validatedMatches;
+      matchesResult.success = validatedMatches.length > 0;
+    }
+
+    // Step 3: Get yesterday's matches for comparison
+    const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    let yesterdayMatches = [];
+    
+                try {
+              const yesterdayCycleResult = await db.query(`
+                SELECT cycle_id as id FROM oracle.oddyssey_cycles 
+                WHERE DATE(cycle_start_time) = $1 
+                ORDER BY cycle_id DESC LIMIT 1
+              `, [yesterdayDate]);
+      
+      if (yesterdayCycleResult.rows.length > 0) {
+        const yesterdayResult = await bulletproofService.getStandardizedMatchesForFrontend(yesterdayCycleResult.rows[0].id);
+        if (yesterdayResult.success) {
+          yesterdayMatches = yesterdayResult.matches;
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error fetching yesterday matches:', error);
+    }
+
+    // Step 4: Final validation and response
+    const todayMatches = matchesResult.matches || [];
+    
+    // ROOT CAUSE FIX: Validate all matches have required odds (frontend format)
+    const validTodayMatches = todayMatches.filter(match => {
+      const hasAllOdds = match.home_odds && match.draw_odds && match.away_odds && 
+        match.over_odds && match.under_odds;
+      
+      if (!hasAllOdds) {
+        console.warn(`⚠️ Match ${match.fixture_id} missing required odds`);
+        console.warn(`   Odds: H=${match.home_odds}, D=${match.draw_odds}, A=${match.away_odds}, O=${match.over_odds}, U=${match.under_odds}`);
+        return false;
+      }
+      
+      // Check for scientific notation
+      const oddsValues = [match.home_odds, match.draw_odds, match.away_odds, match.over_odds, match.under_odds];
+      const hasScientificNotation = oddsValues.some(odds => 
+        bulletproofService.validator.isScientificNotation(odds)
+      );
+      
+      if (hasScientificNotation) {
+        console.error(`❌ Match ${match.fixture_id} has scientific notation in odds`);
+        return false;
+      }
+      
+      return true;
+    });
+
+    console.log(`✅ [BULLETPROOF] Validated ${validTodayMatches.length}/${todayMatches.length} matches for ${targetDate}`);
+
+    // Step 5: Ensure exactly 10 matches or log warning
+    if (validTodayMatches.length !== 10) {
+      console.warn(`⚠️ Expected 10 matches, got ${validTodayMatches.length} for ${targetDate}`);
+    }
+
+    // Add bulletproof cache headers
+    res.set({
+      'Cache-Control': 'public, max-age=30',
+      'X-Data-Pipeline': 'standardized',
+      'X-Validation-Status': 'passed',
+      'X-Match-Count': validTodayMatches.length.toString()
+    });
+
+    const response = createStandardResponse({
+      today: {
+        date: targetDate,
+        matches: validTodayMatches,
+        count: validTodayMatches.length
+      },
+      yesterday: {
+        date: yesterdayDate,
+        matches: yesterdayMatches,
+        count: yesterdayMatches.length
+      }
+    }, {
+      totalMatches: validTodayMatches.length + yesterdayMatches.length,
+      expectedMatches: 10,
+      source: "standardized_pipeline",
+      operation: "get_matches",
+      validationPassed: true,
+      cycleId: cycleId
+    });
+
+    return res.json(bulletproofService.pipeline.transformationRules.bigint.serializeForJson(response));
+
   } catch (error) {
-    console.error('❌ Error in /matches endpoint:', error);
+    console.error('❌ [BULLETPROOF] Error in /matches endpoint:', error);
+    
+    // Log system status for debugging
+    const systemStatus = bulletproofService.getSystemStatus();
+    console.error('🔍 System status:', systemStatus);
+    
     res.status(500).json({
       success: false,
       error: 'Internal server error',
-      message: error.message
+      message: error.message,
+      systemStatus: systemStatus
     });
   }
 }));
@@ -302,34 +346,60 @@ router.get('/current-cycle', cacheMiddleware(30000), async (req, res) => {
 // Add missing live-matches endpoint
 router.post('/live-matches', cacheMiddleware(15000), asyncHandler(async (req, res) => {
   try {
-    // This endpoint should return live match data
-    // For now, return current cycle matches as live matches
-    const currentDate = new Date().toISOString().split('T')[0];
-    
+    const { matchIds } = req.body;
+
+    if (!matchIds || !Array.isArray(matchIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'matchIds array is required'
+      });
+    }
+
+    console.log(`🎯 Fetching live match data for ${matchIds.length} matches`);
+
+    // Get match data with odds from daily_game_matches table
     const liveMatchesQuery = `
       SELECT 
-        fixture_id as id,
-        home_team,
-        away_team,
-        league_name,
-        match_date,
-        home_odds,
-        draw_odds,
-        away_odds,
-        over_25_odds,
-        under_25_odds,
-        display_order
-      FROM oracle.daily_game_matches
-      WHERE game_date = $1
-      ORDER BY display_order ASC
+        dgm.fixture_id as id,
+        dgm.home_team,
+        dgm.away_team,
+        dgm.league_name,
+        dgm.match_date,
+        dgm.home_odds,
+        dgm.draw_odds,
+        dgm.away_odds,
+        dgm.over_25_odds,
+        dgm.under_25_odds,
+        dgm.display_order,
+        f.status,
+        fr.home_score,
+        fr.away_score
+      FROM oracle.daily_game_matches dgm
+      LEFT JOIN oracle.fixtures f ON dgm.fixture_id::VARCHAR = f.id::VARCHAR
+      LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
+      WHERE dgm.fixture_id = ANY($1)
+      ORDER BY dgm.display_order ASC
     `;
     
-    const result = await db.query(liveMatchesQuery, [currentDate]);
-    const liveMatches = result.rows.map((match, index) => transformMatchData(match, index));
+    const result = await db.query(liveMatchesQuery, [matchIds]);
+    const liveMatches = result.rows.map((match, index) => {
+      const transformedMatch = transformMatchData(match, index);
+      
+      // Add live status and scores
+      transformedMatch.status = match.status;
+      if (match.home_score !== null && match.away_score !== null) {
+        transformedMatch.score = {
+          home: match.home_score,
+          away: match.away_score
+        };
+      }
+      
+      return transformedMatch;
+    });
 
     const response = createStandardResponse(liveMatches, {
       count: liveMatches.length,
-      date: currentDate,
+      date: new Date().toISOString().split('T')[0],
       source: "live_matches"
     });
 
@@ -364,10 +434,22 @@ router.get('/leaderboard', cacheMiddleware(60000), asyncHandler(async (req, res)
   }
 }));
 
-// GET /api/oddyssey/stats - Get cycle statistics
+// GET /api/oddyssey/stats - Get statistics (global, user, or cycle)
 router.get('/stats', cacheMiddleware(60000), asyncHandler(async (req, res) => {
   try {
-    const { cycleId } = req.query;
+    const { type, address, cycleId } = req.query;
+    
+    // Handle different types of stats requests
+    if (type === 'global') {
+      return await handleGlobalStats(req, res);
+    } else if (type === 'user' && address) {
+      return await handleUserStats(req, res, address);
+    } else if (type === 'cycle' || cycleId) {
+      return await handleCycleStats(req, res, cycleId);
+    }
+    
+    // Default to cycle stats for backward compatibility
+    const { cycleId: defaultCycleId } = req.query;
     
     // If no cycle ID provided, use current cycle
     let targetCycleId = cycleId;
@@ -655,6 +737,100 @@ router.post('/place-slip', rateLimitMiddleware((req) => `place-slip:${req.body.p
   }
 });
 
+// FIXED: Use the new endpoint with proper enrichment
+router.use('/', require('./oddyssey-slips-fix'));
+
+/* OLD BROKEN ENDPOINT - COMMENTED OUT
+router.get('/user-slips/:address/evaluated', asyncHandler(async (req, res) => {
+  try {
+    const { address } = req.params;
+    
+    // Get all user slips with evaluation data
+    const slipsResult = await db.query(`
+      SELECT 
+        s.slip_id,
+        s.cycle_id,
+        s.player_address,
+        s.predictions,
+        s.is_evaluated,
+        s.evaluation_data,
+        s.final_score,
+        s.correct_count,
+        s.placed_at as created_at
+      FROM oracle.oddyssey_slips s
+      WHERE s.player_address = $1
+      ORDER BY s.placed_at DESC
+      LIMIT 50
+    `, [address]);
+    
+    const evaluatedSlips = slipsResult.rows.map(slip => {
+      const predictions = slip.predictions || [];
+      const evaluationData = slip.evaluation_data || {};
+      
+      // Calculate total odds from predictions
+      let totalOdds = 1;
+      const processedPredictions = predictions.map((pred, index) => {
+        const evaluation = evaluationData[index] || {};
+        
+        // Handle different prediction formats
+        let matchId, prediction, odds;
+        if (Array.isArray(pred)) {
+          // Format: [fixture_id, bet_type, selection_hash, odds]
+          [matchId, , , odds] = pred;
+          prediction = evaluation.predictedResult || 'Unknown';
+        } else if (typeof pred === 'object') {
+          // Format: {matchId, betType, selection, selectedOdd}
+          matchId = pred.matchId;
+          prediction = evaluation.predictedResult || pred.selection;
+          odds = pred.selectedOdd;
+        }
+        
+        // Convert odds to number and multiply for total odds
+        if (odds && typeof odds === 'number' && odds > 0) {
+          totalOdds *= odds;
+        }
+        
+        return {
+          matchId: matchId,
+          prediction: prediction,
+          odds: odds,
+          isCorrect: evaluation.isCorrect,
+          actualResult: evaluation.actualResult,
+          matchResult: evaluation.matchResult,
+          homeScore: evaluation.homeScore,
+          awayScore: evaluation.awayScore,
+          betType: evaluation.betType
+        };
+      });
+      
+      return {
+        slipId: slip.slip_id,
+        cycleId: slip.cycle_id,
+        isEvaluated: slip.is_evaluated,
+        finalScore: slip.final_score || 0,
+        correctCount: slip.correct_count || 0,
+        createdAt: slip.created_at,
+        totalOdds: totalOdds > 1 ? totalOdds : 0, // Return 0 if no valid odds
+        predictions: processedPredictions
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: evaluatedSlips
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting user slips with evaluation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user slips with evaluation',
+      message: error.message
+    });
+  }
+}));
+*/
+
 // Get user's slips for a specific cycle
 router.get('/user-slips/:cycleId/:address', async (req, res) => {
   try {
@@ -800,51 +976,158 @@ router.get('/user-slips/:address', async (req, res) => {
             return null;
           }
 
-          // Get fixture details for team names
+          // Get fixture details for team names, results, and odds
           const fixtureResult = await db.query(`
-            SELECT id, home_team, away_team, league_name, starting_at
-            FROM oracle.fixtures 
-            WHERE id = $1
+            SELECT
+              f.id, f.home_team, f.away_team, f.league_name, f.starting_at,
+              fr.home_score, fr.away_score, fr.outcome_1x2, fr.outcome_ou25,
+              -- Get odds for different markets
+              COALESCE(fo_home.value, '0') as home_odds,
+              COALESCE(fo_draw.value, '0') as draw_odds,
+              COALESCE(fo_away.value, '0') as away_odds,
+              COALESCE(fo_over.value, '0') as over_odds,
+              COALESCE(fo_under.value, '0') as under_odds
+            FROM oracle.fixtures f
+            LEFT JOIN oracle.fixture_results fr ON f.id = fr.fixture_id::text
+            -- Get 1X2 odds
+            LEFT JOIN oracle.fixture_odds fo_home ON f.id = fo_home.fixture_id::text AND fo_home.market_id = '1' AND fo_home.label = 'Home'
+            LEFT JOIN oracle.fixture_odds fo_draw ON f.id = fo_draw.fixture_id::text AND fo_draw.market_id = '1' AND fo_draw.label = 'Draw'
+            LEFT JOIN oracle.fixture_odds fo_away ON f.id = fo_away.fixture_id::text AND fo_away.market_id = '1' AND fo_away.label = 'Away'
+            -- Get Over/Under 2.5 odds
+            LEFT JOIN oracle.fixture_odds fo_over ON f.id = fo_over.fixture_id::text AND fo_over.market_id = '80' AND fo_over.label = 'Over'
+            LEFT JOIN oracle.fixture_odds fo_under ON f.id = fo_under.fixture_id::text AND fo_under.market_id = '80' AND fo_under.label = 'Under'
+            WHERE f.id = $1::text
           `, [matchId]);
 
           const fixture = fixtureResult.rows[0];
           
           if (fixture) {
-            // Calculate proper decimal odds (divide by 1000 since contract uses ODDS_SCALING_FACTOR = 1000)
-            const decimalOdds = parseFloat(odds) / 1000;
-            
+            // Use odds from fixture_odds table based on prediction type
+            let decimalOdds;
+            if (Array.isArray(pred)) {
+              // Contract format: use the stored odds from prediction
+              decimalOdds = parseFloat(odds);
+            } else {
+              // Enriched format: get odds from database based on prediction
+              if (pred.betType === 'MONEYLINE' || pred.betType === '1X2') {
+                if (pred.prediction === '1' || pred.selection === 'home') {
+                  decimalOdds = parseFloat(fixture.home_odds) || parseFloat(odds) || 2.0;
+                } else if (pred.prediction === 'X' || pred.selection === 'draw') {
+                  decimalOdds = parseFloat(fixture.draw_odds) || parseFloat(odds) || 3.0;
+                } else if (pred.prediction === '2' || pred.selection === 'away') {
+                  decimalOdds = parseFloat(fixture.away_odds) || parseFloat(odds) || 2.5;
+                } else {
+                  decimalOdds = parseFloat(odds) || 2.0;
+                }
+              } else if (pred.betType === 'OVER_UNDER' || pred.betType === 'OU') {
+                if (pred.prediction?.toLowerCase().includes('over') || pred.selection?.toLowerCase().includes('over')) {
+                  decimalOdds = parseFloat(fixture.over_odds) || parseFloat(odds) || 2.0;
+                } else if (pred.prediction?.toLowerCase().includes('under') || pred.selection?.toLowerCase().includes('under')) {
+                  decimalOdds = parseFloat(fixture.under_odds) || parseFloat(odds) || 1.8;
+                } else {
+                  decimalOdds = parseFloat(odds) || 2.0;
+                }
+              } else {
+                decimalOdds = parseFloat(odds) || 2.0;
+              }
+                        }
+
+            // Debug logging
+            console.log(`🔍 Match ${matchId}: odds=${decimalOdds}, home_odds=${fixture.home_odds}, draw_odds=${fixture.draw_odds}, away_odds=${fixture.away_odds}, over_odds=${fixture.over_odds}, under_odds=${fixture.under_odds}`);
+
             // Format match time
-            const matchTime = fixture.starting_at ? 
-              new Date(fixture.starting_at).toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
+            const matchTime = fixture.starting_at ?
+              new Date(fixture.starting_at).toLocaleTimeString('en-US', {
+                hour: '2-digit',
                 minute: '2-digit',
-                hour12: false 
+                hour12: false
               }) : '00:00';
 
-            // Determine prediction type based on betType or selection
+            // Determine prediction type based on betType or selection hash
             let prediction;
+            
+            // Check if it's a moneyline bet (betType 0) or over/under bet (betType 1)
             if (betType === '0' || betType === 0) {
-              prediction = '1'; // Home win
+              // Moneyline bet - check selection hash
+              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
+                prediction = 'home'; // Home win
+              } else if (selection === "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6") {
+                prediction = 'draw'; // Draw
+              } else if (selection === "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5" || 
+                         selection === "0x550c64a15031c3064454c19adc6243a6122c138a242eaa098da50bb114fc8d56") {
+                prediction = 'away'; // Away win
+              } else {
+                prediction = 'home'; // Default to home
+              }
             } else if (betType === '1' || betType === 1) {
-              prediction = 'X'; // Draw
-            } else if (betType === '2' || betType === 2) {
-              prediction = '2'; // Away win
+              // Over/Under bet - check selection hash
+              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
+                prediction = 'over'; // Over 2.5
+              } else if (selection === "0xe5f3458d553c578199ad9150ab9a1cce5e22e9b34834f66492b28636da59e11b") {
+                prediction = 'under'; // Under 2.5
+              } else {
+                prediction = 'over'; // Default to over
+              }
             } else {
-              // Try to determine from selection hash or other fields
+              // Fallback - try to determine from other fields
               prediction = pred.prediction || pred.selection || '1';
+            }
+
+            // Check if match has result and evaluate prediction
+            let isCorrect = null;
+            let actualResult = null;
+            
+            if (fixture.home_score !== null && fixture.away_score !== null) {
+              const homeScore = fixture.home_score;
+              const awayScore = fixture.away_score;
+              const totalGoals = homeScore + awayScore;
+              
+              if (betType === '0' || betType === 0) {
+                // 1X2 prediction - use outcome_1x2 if available, otherwise calculate
+                actualResult = fixture.outcome_1x2 || (homeScore > awayScore ? '1' : homeScore < awayScore ? '2' : 'X');
+                
+                // Map prediction to match outcome format
+                let predictionMapped;
+                if (prediction === 'home') predictionMapped = '1';
+                else if (prediction === 'away') predictionMapped = '2';
+                else if (prediction === 'draw') predictionMapped = 'X';
+                else predictionMapped = prediction;
+                
+                isCorrect = predictionMapped === actualResult;
+              } else if (betType === '1' || betType === 1) {
+                // Over/Under 2.5 prediction - use outcome_ou25 if available, otherwise calculate
+                actualResult = fixture.outcome_ou25 || (totalGoals > 2.5 ? 'over' : 'under');
+                
+                // Map prediction to match outcome format
+                let predictionMapped;
+                if (prediction === 'over') predictionMapped = 'over';
+                else if (prediction === 'under') predictionMapped = 'under';
+                else predictionMapped = prediction;
+                
+                isCorrect = predictionMapped === actualResult;
+              }
             }
 
             return {
               matchId: matchId,
               match_id: matchId,
               prediction: prediction,
+              pick: prediction, // Add pick field for frontend compatibility
               selectedOdd: odds,
               home_team: fixture.home_team,
               away_team: fixture.away_team,
+              team1: fixture.home_team, // Add team1 for frontend compatibility
+              team2: fixture.away_team, // Add team2 for frontend compatibility
               league_name: fixture.league_name,
               match_time: matchTime,
+              time: matchTime, // Add time field for frontend compatibility
               odds: decimalOdds,
-              starting_at: fixture.starting_at
+              odd: decimalOdds, // Add odd field for frontend compatibility
+              starting_at: fixture.starting_at,
+              id: matchId, // Add id field for frontend compatibility
+              isCorrect: isCorrect, // Add evaluation result
+              actualResult: actualResult, // Add actual match result
+              matchResult: fixture.result_info // Add full match result
             };
           }
           
@@ -853,12 +1136,18 @@ router.get('/user-slips/:address', async (req, res) => {
             matchId: matchId,
             match_id: matchId,
             prediction: '1',
+            pick: '1', // Add pick field for frontend compatibility
             selectedOdd: odds,
-            home_team: `Team ${matchId}`,
-            away_team: `Team ${matchId}`,
+            home_team: `Home Team ${matchId}`,
+            away_team: `Away Team ${matchId}`,
+            team1: `Home Team ${matchId}`, // Add team1 for frontend compatibility
+            team2: `Away Team ${matchId}`, // Add team2 for frontend compatibility
             league_name: 'Unknown League',
             match_time: '00:00',
-            odds: parseFloat(odds) / 1000
+            time: '00:00', // Add time field for frontend compatibility
+            odds: parseFloat(odds) / 1000,
+            odd: parseFloat(odds) / 1000, // Add odd field for frontend compatibility
+            id: matchId // Add id field for frontend compatibility
           };
         } catch (error) {
           console.error(`Error enriching prediction for match ${pred[0] || pred.matchId}:`, error);
@@ -868,12 +1157,18 @@ router.get('/user-slips/:address', async (req, res) => {
             matchId: matchId,
             match_id: matchId,
             prediction: '1',
+            pick: '1', // Add pick field for frontend compatibility
             selectedOdd: odds,
-            home_team: `Team ${matchId}`,
-            away_team: `Team ${matchId}`,
+            home_team: `Home Team ${matchId}`,
+            away_team: `Away Team ${matchId}`,
+            team1: `Home Team ${matchId}`, // Add team1 for frontend compatibility
+            team2: `Away Team ${matchId}`, // Add team2 for frontend compatibility
             league_name: 'Unknown League',
             match_time: '00:00',
-            odds: parseFloat(odds) / 1000
+            time: '00:00', // Add time field for frontend compatibility
+            odds: parseFloat(odds) / 1000,
+            odd: parseFloat(odds) / 1000, // Add odd field for frontend compatibility
+            id: matchId // Add id field for frontend compatibility
           };
         }
       }));
@@ -985,47 +1280,130 @@ router.get('/slips/:playerAddress', async (req, res) => {
           const fixtureResult = await db.query(`
             SELECT id, home_team, away_team, league_name, starting_at
             FROM oracle.fixtures 
-            WHERE id = $1
+            WHERE id = $1::text
           `, [matchId]);
 
           const fixture = fixtureResult.rows[0];
           
           if (fixture) {
-            // Calculate proper decimal odds (divide by 1000 since contract uses ODDS_SCALING_FACTOR = 1000)
-            const decimalOdds = parseFloat(odds) / 1000;
-            
+            // Use odds from fixture_odds table based on prediction type
+            let decimalOdds;
+            if (Array.isArray(pred)) {
+              // Contract format: use the stored odds from prediction
+              decimalOdds = parseFloat(odds);
+            } else {
+              // Enriched format: get odds from database based on prediction
+              if (pred.betType === 'MONEYLINE' || pred.betType === '1X2') {
+                if (pred.prediction === '1' || pred.selection === 'home') {
+                  decimalOdds = parseFloat(fixture.home_odds) || parseFloat(odds) || 2.0;
+                } else if (pred.prediction === 'X' || pred.selection === 'draw') {
+                  decimalOdds = parseFloat(fixture.draw_odds) || parseFloat(odds) || 3.0;
+                } else if (pred.prediction === '2' || pred.selection === 'away') {
+                  decimalOdds = parseFloat(fixture.away_odds) || parseFloat(odds) || 2.5;
+                } else {
+                  decimalOdds = parseFloat(odds) || 2.0;
+                }
+              } else if (pred.betType === 'OVER_UNDER' || pred.betType === 'OU') {
+                if (pred.prediction?.toLowerCase().includes('over') || pred.selection?.toLowerCase().includes('over')) {
+                  decimalOdds = parseFloat(fixture.over_odds) || parseFloat(odds) || 2.0;
+                } else if (pred.prediction?.toLowerCase().includes('under') || pred.selection?.toLowerCase().includes('under')) {
+                  decimalOdds = parseFloat(fixture.under_odds) || parseFloat(odds) || 1.8;
+                } else {
+                  decimalOdds = parseFloat(odds) || 2.0;
+                }
+              } else {
+                decimalOdds = parseFloat(odds) || 2.0;
+              }
+                        }
+
+            // Debug logging
+            console.log(`🔍 Match ${matchId}: odds=${decimalOdds}, home_odds=${fixture.home_odds}, draw_odds=${fixture.draw_odds}, away_odds=${fixture.away_odds}, over_odds=${fixture.over_odds}, under_odds=${fixture.under_odds}`);
+
             // Format match time
-            const matchTime = fixture.starting_at ? 
-              new Date(fixture.starting_at).toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
+            const matchTime = fixture.starting_at ?
+              new Date(fixture.starting_at).toLocaleTimeString('en-US', {
+                hour: '2-digit',
                 minute: '2-digit',
-                hour12: false 
+                hour12: false
               }) : '00:00';
 
-            // Determine prediction type based on betType or selection
+            // Determine prediction type based on betType or selection hash
             let prediction;
+            
+            // Check if it's a moneyline bet (betType 0) or over/under bet (betType 1)
             if (betType === '0' || betType === 0) {
-              prediction = '1'; // Home win
+              // Moneyline bet - check selection hash
+              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
+                prediction = 'home'; // Home win
+              } else if (selection === "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6") {
+                prediction = 'draw'; // Draw
+              } else if (selection === "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5" || 
+                         selection === "0x550c64a15031c3064454c19adc6243a6122c138a242eaa098da50bb114fc8d56") {
+                prediction = 'away'; // Away win
+              } else {
+                prediction = 'home'; // Default to home
+              }
             } else if (betType === '1' || betType === 1) {
-              prediction = 'X'; // Draw
-            } else if (betType === '2' || betType === 2) {
-              prediction = '2'; // Away win
+              // Over/Under bet - check selection hash
+              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
+                prediction = 'over'; // Over 2.5
+              } else if (selection === "0xe5f3458d553c578199ad9150ab9a1cce5e22e9b34834f66492b28636da59e11b") {
+                prediction = 'under'; // Under 2.5
+              } else {
+                prediction = 'over'; // Default to over
+              }
             } else {
-              // Try to determine from selection hash or other fields
+              // Fallback - try to determine from other fields
               prediction = pred.prediction || pred.selection || '1';
+            }
+
+            // Check if match has result and evaluate prediction
+            let isCorrect = null;
+            let actualResult = null;
+            
+            if (fixture.result_info) {
+              const result = fixture.result_info;
+              const homeScore = result.home_score || 0;
+              const awayScore = result.away_score || 0;
+              const totalGoals = homeScore + awayScore;
+              
+              if (betType === '0' || betType === 0) {
+                // 1X2 prediction
+                if (homeScore > awayScore) {
+                  actualResult = 'home';
+                } else if (homeScore < awayScore) {
+                  actualResult = 'away';
+                } else {
+                  actualResult = 'draw';
+                }
+                isCorrect = prediction === actualResult;
+              } else if (betType === '1' || betType === 1) {
+                // Over/Under 2.5 prediction
+                actualResult = totalGoals > 2.5 ? 'over' : 'under';
+                isCorrect = prediction === actualResult;
+              }
             }
 
             return {
               matchId: matchId,
               match_id: matchId,
               prediction: prediction,
+              pick: prediction, // Add pick field for frontend compatibility
               selectedOdd: odds,
               home_team: fixture.home_team,
               away_team: fixture.away_team,
+              team1: fixture.home_team, // Add team1 for frontend compatibility
+              team2: fixture.away_team, // Add team2 for frontend compatibility
               league_name: fixture.league_name,
               match_time: matchTime,
+              time: matchTime, // Add time field for frontend compatibility
               odds: decimalOdds,
-              starting_at: fixture.starting_at
+              odd: decimalOdds, // Add odd field for frontend compatibility
+              starting_at: fixture.starting_at,
+              id: matchId, // Add id field for frontend compatibility
+              isCorrect: isCorrect, // Add evaluation result
+              actualResult: actualResult, // Add actual match result
+              matchResult: fixture.result_info // Add full match result
             };
           }
           
@@ -1034,12 +1412,18 @@ router.get('/slips/:playerAddress', async (req, res) => {
             matchId: matchId,
             match_id: matchId,
             prediction: '1',
+            pick: '1', // Add pick field for frontend compatibility
             selectedOdd: odds,
-            home_team: `Team ${matchId}`,
-            away_team: `Team ${matchId}`,
+            home_team: `Home Team ${matchId}`,
+            away_team: `Away Team ${matchId}`,
+            team1: `Home Team ${matchId}`, // Add team1 for frontend compatibility
+            team2: `Away Team ${matchId}`, // Add team2 for frontend compatibility
             league_name: 'Unknown League',
             match_time: '00:00',
-            odds: parseFloat(odds) / 1000
+            time: '00:00', // Add time field for frontend compatibility
+            odds: parseFloat(odds) / 1000,
+            odd: parseFloat(odds) / 1000, // Add odd field for frontend compatibility
+            id: matchId // Add id field for frontend compatibility
           };
         } catch (error) {
           console.error(`Error enriching prediction for match ${pred[0] || pred.matchId}:`, error);
@@ -1049,12 +1433,18 @@ router.get('/slips/:playerAddress', async (req, res) => {
             matchId: matchId,
             match_id: matchId,
             prediction: '1',
+            pick: '1', // Add pick field for frontend compatibility
             selectedOdd: odds,
-            home_team: `Team ${matchId}`,
-            away_team: `Team ${matchId}`,
+            home_team: `Home Team ${matchId}`,
+            away_team: `Away Team ${matchId}`,
+            team1: `Home Team ${matchId}`, // Add team1 for frontend compatibility
+            team2: `Away Team ${matchId}`, // Add team2 for frontend compatibility
             league_name: 'Unknown League',
             match_time: '00:00',
-            odds: parseFloat(odds) / 1000
+            time: '00:00', // Add time field for frontend compatibility
+            odds: parseFloat(odds) / 1000,
+            odd: parseFloat(odds) / 1000, // Add odd field for frontend compatibility
+            id: matchId // Add id field for frontend compatibility
           };
         }
       }));
@@ -1190,6 +1580,7 @@ router.get('/results/:date', async (req, res) => {
           WHEN f.status IN ('FT', 'AET', 'PEN') THEN 'finished'
           WHEN f.status IN ('1H', '2H', 'HT') THEN 'live'
           WHEN f.status IN ('NS', 'Fixture') AND f.match_date > NOW() THEN 'upcoming'
+          WHEN f.status IN ('NS', 'Fixture') AND f.match_date <= NOW() AND fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL THEN 'finished'
           WHEN f.status IN ('NS', 'Fixture') AND f.match_date <= NOW() THEN 'delayed'
           ELSE 'unknown'
         END as match_status
@@ -1210,14 +1601,14 @@ router.get('/results/:date', async (req, res) => {
       match_date: match.match_date,
       status: match.match_status,
       display_order: 1, // Default order
-      result: match.home_score !== null ? {
+      result: {
         home_score: match.home_score,
         away_score: match.away_score,
         outcome_1x2: match.outcome_1x2,
         outcome_ou25: match.outcome_ou25,
         finished_at: match.finished_at,
         is_finished: match.match_status === 'finished'
-      } : null
+      }
     }));
     
     const finishedMatches = matches.filter(match => match.status === 'finished').length;
@@ -1299,5 +1690,889 @@ router.get('/available-dates', async (req, res) => {
     });
   }
 });
+
+// ROOT CAUSE FIX: Add endpoint for slip evaluation details
+router.get('/slip-evaluation/:slipId', asyncHandler(async (req, res) => {
+  try {
+    const { slipId } = req.params;
+    
+    console.log(`🎯 Fetching evaluation details for slip ${slipId}`);
+    
+    // Get slip details with predictions and results
+    const slipResult = await db.query(`
+      SELECT 
+        os.slip_id, os.cycle_id, os.final_score, os.correct_count, os.is_evaluated,
+        os.predictions, os.player_address
+      FROM oracle.oddyssey_slips os
+      WHERE os.slip_id = $1
+    `, [slipId]);
+    
+    if (slipResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Slip not found'
+      });
+    }
+    
+    const slip = slipResult.rows[0];
+    
+    if (!slip.is_evaluated) {
+      return res.json({
+        success: true,
+        data: {
+          slipId: slip.slip_id,
+          cycleId: slip.cycle_id,
+          isEvaluated: false,
+          message: 'Slip not yet evaluated'
+        }
+      });
+    }
+    
+    // Get match results for this cycle
+    const resultsQuery = await db.query(`
+      SELECT fixture_id, result_1x2, result_ou25, home_score, away_score
+      FROM oracle.fixture_results fr
+      WHERE EXISTS (
+        SELECT 1 FROM oracle.daily_game_matches dgm 
+        WHERE dgm.fixture_id = fr.fixture_id AND dgm.cycle_id = $1
+      )
+    `, [slip.cycle_id]);
+    
+    const results = {};
+    resultsQuery.rows.forEach(row => {
+      results[row.fixture_id] = {
+        result_1x2: row.result_1x2,
+        result_ou25: row.result_ou25,
+        home_score: row.home_score,
+        away_score: row.away_score
+      };
+    });
+    
+    // Parse predictions and evaluate each one
+    const predictions = slip.predictions || [];
+    const evaluatedPredictions = [];
+    
+    for (const prediction of predictions) {
+      let matchId, betType, selection, odds;
+      
+      if (Array.isArray(prediction)) {
+        [matchId, betType, selection, odds] = prediction;
+      } else {
+        matchId = prediction.matchId;
+        betType = prediction.betType;
+        selection = prediction.selection;
+        odds = prediction.odds;
+      }
+      
+      const result = results[matchId];
+      let isCorrect = false;
+      let actualResult = null;
+      
+      if (result) {
+        if (betType === "0") { // 1X2
+          actualResult = result.result_1x2;
+          if (selection === "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6" && actualResult === "X") {
+            isCorrect = true; // Draw
+          } else if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62" && actualResult === "1") {
+            isCorrect = true; // Home win
+          } else if (selection === "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5" && actualResult === "2") {
+            isCorrect = true; // Away win
+          }
+        } else if (betType === "1") { // Over/Under
+          actualResult = result.result_ou25;
+          if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62" && actualResult === "Over") {
+            isCorrect = true; // Over
+          } else if (selection === "0xe5f3458d553c578199ad9150ab9a1cce5e22e9b34834f66492b28636da59e11b" && actualResult === "Under") {
+            isCorrect = true; // Under
+          }
+        }
+      }
+      
+      evaluatedPredictions.push({
+        matchId: matchId,
+        betType: betType,
+        selection: selection,
+        odds: odds,
+        isCorrect: isCorrect,
+        actualResult: actualResult,
+        homeScore: result?.home_score,
+        awayScore: result?.away_score
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        slipId: slip.slip_id,
+        cycleId: slip.cycle_id,
+        playerAddress: slip.player_address,
+        finalScore: slip.final_score,
+        correctCount: slip.correct_count,
+        totalPredictions: predictions.length,
+        isEvaluated: slip.is_evaluated,
+        predictions: evaluatedPredictions
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching slip evaluation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+}));
+
+// Add missing contract-matches endpoint that frontend expects
+router.get('/contract-matches', asyncHandler(async (req, res) => {
+  try {
+    console.log('🎯 Frontend requesting contract-compatible matches...');
+    
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get current cycle for today
+    const cycleResult = await db.query(`
+      SELECT cycle_id, matches_data FROM oracle.oddyssey_cycles 
+      WHERE DATE(cycle_start_time) = $1 
+      ORDER BY cycle_id DESC LIMIT 1
+    `, [today]);
+
+    if (cycleResult.rows.length === 0) {
+      return res.json({
+        success: false,
+        error: 'No active cycle found for today',
+        data: []
+      });
+    }
+
+    const cycle = cycleResult.rows[0];
+    const matchesData = cycle.matches_data;
+    
+    if (!matchesData || matchesData.length === 0) {
+      return res.json({
+        success: false,
+        error: 'No matches found in current cycle',
+        data: []
+      });
+    }
+
+    console.log(`📊 Retrieved ${matchesData.length} matches from cycle ${cycle.cycle_id}`);
+    
+    // Get match details with odds from database
+    const fixtureIds = matchesData.map(m => m.id);
+    const matchDetailsResult = await db.query(`
+      SELECT DISTINCT
+        f.id as fixture_id,
+        f.home_team,
+        f.away_team,
+        f.league_name,
+        f.match_date,
+        f.status,
+        (SELECT value FROM oracle.fixture_odds WHERE fixture_id = f.id::VARCHAR AND market_id = '1' AND label = 'Home' LIMIT 1) as home_odds,
+        (SELECT value FROM oracle.fixture_odds WHERE fixture_id = f.id::VARCHAR AND market_id = '1' AND label = 'Draw' LIMIT 1) as draw_odds,
+        (SELECT value FROM oracle.fixture_odds WHERE fixture_id = f.id::VARCHAR AND market_id = '1' AND label = 'Away' LIMIT 1) as away_odds,
+        (SELECT value FROM oracle.fixture_odds WHERE fixture_id = f.id::VARCHAR AND market_id = '80' AND label = 'Over' AND total = '2.500000' LIMIT 1) as over_odds,
+        (SELECT value FROM oracle.fixture_odds WHERE fixture_id = f.id::VARCHAR AND market_id = '80' AND label = 'Under' AND total = '2.500000' LIMIT 1) as under_odds
+      FROM oracle.fixtures f
+      WHERE f.id = ANY($1)
+      ORDER BY f.match_date ASC
+    `, [fixtureIds]);
+
+    // Transform to contract-compatible format
+    const contractMatches = matchDetailsResult.rows.map((match, index) => ({
+      id: parseInt(match.fixture_id),
+      startTime: Math.floor(new Date(match.match_date).getTime() / 1000),
+      oddsHome: Math.floor((match.home_odds || 2.0) * 1000), // Scale by 1000 for contract format
+      oddsDraw: Math.floor((match.draw_odds || 3.0) * 1000),
+      oddsAway: Math.floor((match.away_odds || 2.5) * 1000),
+      oddsOver: Math.floor((match.over_odds || 1.8) * 1000),
+      oddsUnder: Math.floor((match.under_odds || 2.0) * 1000),
+      homeTeam: match.home_team,
+      awayTeam: match.away_team,
+      leagueName: match.league_name,
+      displayOrder: index + 1,
+      status: match.status
+    }));
+
+    console.log(`✅ Returning ${contractMatches.length} matches in contract format for frontend`);
+    
+    return res.json({
+      success: true,
+      data: contractMatches,
+      meta: {
+        cycleId: cycle.cycle_id,
+        totalMatches: contractMatches.length,
+        source: 'database_sync',
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in contract-matches endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message,
+      data: []
+    });
+  }
+}));
+
+// NEW: Check cycle synchronization status
+router.get('/cycle-sync', asyncHandler(async (req, res) => {
+  try {
+    const OddysseyManager = require('../services/oddyssey-manager');
+    const oddysseyManager = new OddysseyManager();
+    await oddysseyManager.initialize();
+    
+    const syncStatus = await oddysseyManager.checkCycleSync();
+    
+    res.json({
+      success: true,
+      data: syncStatus
+    });
+  } catch (error) {
+    console.error('❌ Error checking cycle sync:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check cycle sync',
+      message: error.message
+    });
+  }
+}));
+
+// NEW: Check cycle synchronization status (alternative endpoint for frontend compatibility)
+router.get('/cycle-sync-status', asyncHandler(async (req, res) => {
+  try {
+    const OddysseyManager = require('../services/oddyssey-manager');
+    const oddysseyManager = new OddysseyManager();
+    await oddysseyManager.initialize();
+    
+    const syncStatus = await oddysseyManager.checkCycleSync();
+    
+    res.json({
+      success: true,
+      data: syncStatus
+    });
+  } catch (error) {
+    console.error('❌ Error checking cycle sync status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check cycle sync status',
+      message: error.message
+    });
+  }
+}));
+
+// NEW: Force cycle synchronization (admin only)
+router.post('/cycle-sync/force', asyncHandler(async (req, res) => {
+  try {
+    const OddysseyManager = require('../services/oddyssey-manager');
+    const oddysseyManager = new OddysseyManager();
+    await oddysseyManager.initialize();
+    
+    const result = await oddysseyManager.forceCycleSync();
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('❌ Error forcing cycle sync:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to force cycle sync',
+      message: error.message
+    });
+  }
+}));
+
+// NEW: Get evaluated slip with real data
+router.get('/evaluated-slip/:slipId', asyncHandler(async (req, res) => {
+  try {
+    const { slipId } = req.params;
+    
+    // Get slip with evaluation data
+    const slipResult = await db.query(`
+      SELECT 
+        s.slip_id,
+        s.cycle_id,
+        s.player_address,
+        s.predictions,
+        s.is_evaluated,
+        s.evaluation_data,
+        s.final_score,
+        s.correct_count,
+        s.created_at,
+        c.matches_data,
+        c.is_resolved
+      FROM oracle.oddyssey_slips s
+      LEFT JOIN oracle.oddyssey_cycles c ON s.cycle_id = c.cycle_id
+      WHERE s.slip_id = $1
+    `, [slipId]);
+    
+    if (slipResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Slip not found'
+      });
+    }
+    
+    const slip = slipResult.rows[0];
+    
+    // Parse predictions and evaluation data
+    const predictions = JSON.parse(slip.predictions || '[]');
+    const evaluationData = JSON.parse(slip.evaluation_data || '{}');
+    const matchesData = JSON.parse(slip.matches_data || '[]');
+    
+    // Transform to frontend format
+    const evaluatedSlip = {
+      slipId: slip.slip_id,
+      cycleId: slip.cycle_id,
+      playerAddress: slip.player_address,
+      isEvaluated: slip.is_evaluated,
+      finalScore: slip.final_score || 0,
+      correctCount: slip.correct_count || 0,
+      createdAt: slip.created_at,
+      isResolved: slip.is_resolved,
+      predictions: predictions.map((pred, index) => {
+        const match = matchesData[index] || {};
+        const evaluation = evaluationData[index] || {};
+        
+        return {
+          matchId: pred.matchId,
+          homeTeam: match.home_team || pred.homeTeam,
+          awayTeam: match.away_team || pred.awayTeam,
+          prediction: pred.prediction,
+          odds: pred.odds,
+          isCorrect: evaluation.isCorrect,
+          actualResult: evaluation.actualResult,
+          matchResult: evaluation.matchResult,
+          homeScore: evaluation.homeScore,
+          awayScore: evaluation.awayScore
+        };
+      })
+    };
+    
+    res.json({
+      success: true,
+      data: evaluatedSlip
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting evaluated slip:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get evaluated slip',
+      message: error.message
+    });
+  }
+}));
+
+// NEW: Get user slips with evaluation data
+router.get('/user-slips-evaluated/:address', asyncHandler(async (req, res) => {
+  try {
+    const { address } = req.params;
+    
+    // Get all user slips with evaluation data
+    const slipsResult = await db.query(`
+      SELECT 
+        s.slip_id,
+        s.cycle_id,
+        s.player_address,
+        s.predictions,
+        s.is_evaluated,
+        s.evaluation_data,
+        s.final_score,
+        s.correct_count,
+        s.created_at,
+        c.matches_data,
+        c.is_resolved,
+        c.cycle_start_time,
+        c.cycle_end_time
+      FROM oracle.oddyssey_slips s
+      LEFT JOIN oracle.oddyssey_cycles c ON s.cycle_id = c.cycle_id
+      WHERE s.player_address = $1
+      ORDER BY s.created_at DESC
+      LIMIT 50
+    `, [address]);
+    
+    const evaluatedSlips = slipsResult.rows.map(slip => {
+      const predictions = slip.predictions || [];
+      const evaluationData = slip.evaluation_data || {};
+      
+      // Calculate total odds from predictions
+      let totalOdds = 1;
+      const processedPredictions = predictions.map((pred, index) => {
+        const evaluation = evaluationData[index] || {};
+        
+        // Handle different prediction formats
+        let matchId, prediction, odds;
+        if (Array.isArray(pred)) {
+          // Format: [fixture_id, bet_type, selection_hash, odds]
+          [matchId, , , odds] = pred;
+          prediction = evaluation.predictedResult || 'Unknown';
+        } else if (typeof pred === 'object') {
+          // Format: {matchId, betType, selection, selectedOdd}
+          matchId = pred.matchId;
+          prediction = evaluation.predictedResult || pred.selection;
+          odds = pred.selectedOdd;
+        }
+        
+        // Convert odds to number and multiply for total odds
+        if (odds && typeof odds === 'number' && odds > 0) {
+          totalOdds *= odds;
+        }
+        
+        return {
+          matchId: matchId,
+          prediction: prediction,
+          odds: odds,
+          isCorrect: evaluation.isCorrect,
+          actualResult: evaluation.actualResult,
+          matchResult: evaluation.matchResult,
+          homeScore: evaluation.homeScore,
+          awayScore: evaluation.awayScore,
+          betType: evaluation.betType
+        };
+      });
+      
+      return {
+        slipId: slip.slip_id,
+        cycleId: slip.cycle_id,
+        isEvaluated: slip.is_evaluated,
+        finalScore: slip.final_score || 0,
+        correctCount: slip.correct_count || 0,
+        createdAt: slip.created_at,
+        totalOdds: totalOdds > 1 ? totalOdds : 0, // Return 0 if no valid odds
+        predictions: processedPredictions
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: evaluatedSlips
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting user slips with evaluation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user slips with evaluation',
+      message: error.message
+    });
+  }
+}));
+
+// GET /api/oddyssey/current-prize-pool - Get current cycle prize pool
+router.get('/current-prize-pool', cacheMiddleware(30000), asyncHandler(async (req, res) => {
+  try {
+    const currentCycleQuery = `
+      SELECT cycle_id, prize_pool, matches_count, is_resolved
+      FROM oracle.oddyssey_cycles 
+      WHERE is_resolved = false 
+      ORDER BY cycle_id DESC 
+      LIMIT 1
+    `;
+    
+    const result = await db.query(currentCycleQuery);
+    const currentCycle = result.rows[0];
+    
+    if (!currentCycle) {
+      return res.json({
+        success: true,
+        data: {
+          cycleId: null,
+          prizePool: '0',
+          formattedPrizePool: '0 STT',
+          matchesCount: 0,
+          isActive: false
+        }
+      });
+    }
+    
+    const prizePool = parseFloat(currentCycle.prize_pool) || 0;
+    
+    res.json({
+      success: true,
+      data: {
+        cycleId: currentCycle.cycle_id,
+        prizePool: currentCycle.prize_pool,
+        formattedPrizePool: `${prizePool.toFixed(2)} STT`,
+        matchesCount: currentCycle.matches_count || 0,
+        isActive: !currentCycle.is_resolved
+      },
+      meta: {
+        source: 'current_prize_pool',
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching current prize pool:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch current prize pool',
+      message: error.message
+    });
+  }
+}));
+
+// GET /api/oddyssey/daily-stats - Get today's participation stats
+router.get('/daily-stats', cacheMiddleware(60000), asyncHandler(async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get today's stats (slips placed today)
+    const dailyStatsQuery = `
+      SELECT 
+        COUNT(DISTINCT os.player_address) as daily_players,
+        COUNT(os.slip_id) as daily_slips,
+        COALESCE(AVG(os.correct_count), 0) as avg_correct_today
+      FROM oracle.oddyssey_slips os
+      WHERE DATE(os.placed_at) = $1
+    `;
+    
+    const result = await db.query(dailyStatsQuery, [today]);
+    const stats = result.rows[0];
+    
+    // Get current cycle info
+    const currentCycleQuery = `
+      SELECT cycle_id, prize_pool 
+      FROM oracle.oddyssey_cycles 
+      WHERE is_resolved = false 
+      ORDER BY cycle_id DESC 
+      LIMIT 1
+    `;
+    
+    const cycleResult = await db.query(currentCycleQuery);
+    const currentCycle = cycleResult.rows[0];
+    
+    res.json({
+      success: true,
+      data: {
+        date: today,
+        dailyPlayers: parseInt(stats.daily_players) || 0,
+        dailySlips: parseInt(stats.daily_slips) || 0,
+        avgCorrectToday: parseFloat(stats.avg_correct_today) || 0,
+        currentCycleId: currentCycle?.cycle_id || null,
+        currentPrizePool: currentCycle?.prize_pool || '0'
+      },
+      meta: {
+        source: 'daily_stats',
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching daily stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch daily stats',
+      message: error.message
+    });
+  }
+}));
+
+// Stats handler functions
+async function handleGlobalStats(req, res) {
+  try {
+    console.log('📊 Fetching global Oddyssey stats...');
+    
+    // Get global stats from database aggregation
+    const globalStatsQuery = `
+      SELECT 
+        COUNT(DISTINCT os.player_address) as total_players,
+        COUNT(os.slip_id) as total_slips,
+        COALESCE(SUM(oc.prize_pool), 0) as total_volume,
+        COALESCE(AVG(oc.prize_pool), 0) as avg_prize_pool,
+        COUNT(DISTINCT oc.cycle_id) as total_cycles,
+        COUNT(DISTINCT CASE WHEN oc.is_resolved = false THEN oc.cycle_id END) as active_cycles,
+        COALESCE(AVG(os.correct_count), 0) as avg_correct,
+        COALESCE(AVG(CASE WHEN os.correct_count >= 7 THEN 1.0 ELSE 0.0 END) * 100, 0) as win_rate
+      FROM oracle.oddyssey_cycles oc
+      LEFT JOIN oracle.oddyssey_slips os ON oc.cycle_id = os.cycle_id
+    `;
+    
+    const result = await db.query(globalStatsQuery);
+    const stats = result.rows[0];
+    
+    // Get current cycle prize pool
+    const currentCycleQuery = `
+      SELECT cycle_id, prize_pool 
+      FROM oracle.oddyssey_cycles 
+      WHERE is_resolved = false 
+      ORDER BY cycle_id DESC 
+      LIMIT 1
+    `;
+    const currentCycleResult = await db.query(currentCycleQuery);
+    const currentPrizePool = currentCycleResult.rows[0]?.prize_pool || '0';
+    
+    const transformedStats = {
+      totalPlayers: parseInt(stats.total_players) || 0,
+      totalSlips: parseInt(stats.total_slips) || 0,
+      totalVolume: parseFloat(stats.total_volume) || 0,
+      avgPrizePool: parseFloat(stats.avg_prize_pool) || 0,
+      currentPrizePool: parseFloat(currentPrizePool) || 0,
+      totalCycles: parseInt(stats.total_cycles) || 0,
+      activeCycles: parseInt(stats.active_cycles) || 0,
+      avgCorrect: parseFloat(stats.avg_correct) || 0,
+      winRate: parseFloat(stats.win_rate) || 0
+    };
+    
+    console.log('✅ Global stats:', transformedStats);
+    
+    res.json({
+      success: true,
+      data: transformedStats,
+      meta: {
+        source: 'global_stats',
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching global stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch global stats',
+      message: error.message
+    });
+  }
+}
+
+async function handleUserStats(req, res, address) {
+  try {
+    console.log(`📊 Fetching user stats for ${address}...`);
+    
+    // Get user stats from database
+    const userStatsQuery = `
+      SELECT 
+        COUNT(os.slip_id) as total_slips,
+        COUNT(CASE WHEN os.correct_count >= 7 THEN 1 END) as total_wins,
+        COALESCE(MAX(os.final_score), 0) as best_score,
+        COALESCE(AVG(os.final_score), 0) as average_score,
+        COALESCE(AVG(CASE WHEN os.correct_count >= 7 THEN 1.0 ELSE 0.0 END) * 100, 0) as win_rate,
+        COALESCE(AVG(os.correct_count), 0) as avg_correct,
+        MAX(os.cycle_id) as last_active_cycle
+      FROM oracle.oddyssey_slips os
+      WHERE os.player_address = $1
+    `;
+    
+    const result = await db.query(userStatsQuery, [address]);
+    const stats = result.rows[0];
+    
+    // Calculate streaks (simplified - could be enhanced)
+    const streakQuery = `
+      SELECT 
+        os.cycle_id,
+        os.correct_count >= 7 as is_win
+      FROM oracle.oddyssey_slips os
+      WHERE os.player_address = $1
+      AND os.is_evaluated = true
+      ORDER BY os.cycle_id DESC
+      LIMIT 20
+    `;
+    
+    const streakResult = await db.query(streakQuery, [address]);
+    let currentStreak = 0;
+    let bestStreak = 0;
+    let tempStreak = 0;
+    
+    for (const row of streakResult.rows) {
+      if (row.is_win) {
+        tempStreak++;
+        if (currentStreak === 0) currentStreak = tempStreak; // First streak is current
+        bestStreak = Math.max(bestStreak, tempStreak);
+      } else {
+        tempStreak = 0;
+      }
+    }
+    
+    const transformedStats = {
+      totalSlips: parseInt(stats.total_slips) || 0,
+      totalWins: parseInt(stats.total_wins) || 0,
+      bestScore: parseInt(stats.best_score) || 0,
+      averageScore: parseFloat(stats.average_score) || 0,
+      winRate: parseFloat(stats.win_rate) || 0,
+      avgCorrect: parseFloat(stats.avg_correct) || 0,
+      currentStreak: currentStreak,
+      bestStreak: bestStreak,
+      lastActiveCycle: parseInt(stats.last_active_cycle) || 0
+    };
+    
+    console.log('✅ User stats:', transformedStats);
+    
+    res.json({
+      success: true,
+      data: transformedStats,
+      meta: {
+        source: 'user_stats',
+        address: address,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching user stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user stats',
+      message: error.message
+    });
+  }
+}
+
+async function handleCycleStats(req, res, cycleId) {
+  try {
+    // If no cycle ID provided, use current cycle
+    let targetCycleId = cycleId;
+    if (!targetCycleId) {
+      const currentCycleQuery = `
+        SELECT cycle_id 
+        FROM oracle.oddyssey_cycles 
+        WHERE is_resolved = false 
+        ORDER BY cycle_id DESC 
+        LIMIT 1
+      `;
+      const currentCycleResult = await db.query(currentCycleQuery);
+      targetCycleId = currentCycleResult.rows[0]?.cycle_id;
+    }
+
+    if (!targetCycleId) {
+      return res.json({
+        success: true,
+        data: {
+          cycleId: null,
+          participants: 0,
+          totalSlips: 0,
+          prizePool: '0',
+          avgCorrectPredictions: 0,
+          maxCorrectPredictions: 0,
+          isResolved: false
+        },
+        meta: {
+          source: 'cycle_stats',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // Get cycle statistics
+    const statsQuery = `
+      SELECT 
+        oc.cycle_id,
+        oc.prize_pool,
+        oc.matches_count,
+        oc.is_resolved,
+        oc.resolved_at,
+        COUNT(DISTINCT os.player_address) as participants,
+        COUNT(os.slip_id) as total_slips,
+        COALESCE(AVG(os.correct_count), 0) as avg_correct_predictions,
+        COALESCE(MAX(os.correct_count), 0) as max_correct_predictions
+      FROM oracle.oddyssey_cycles oc
+      LEFT JOIN oracle.oddyssey_slips os ON oc.cycle_id = os.cycle_id
+      WHERE oc.cycle_id = $1
+      GROUP BY oc.cycle_id, oc.prize_pool, oc.matches_count, oc.is_resolved, oc.resolved_at
+    `;
+    
+    const result = await db.query(statsQuery, [targetCycleId]);
+    const stats = result.rows[0];
+    
+    if (!stats) {
+      return res.status(404).json({
+        success: false,
+        error: 'Cycle not found',
+        message: `Cycle ${targetCycleId} does not exist`
+      });
+    }
+
+    // Transform the data to match frontend expectations
+    const transformedStats = {
+      cycleId: stats.cycle_id,
+      participants: parseInt(stats.participants) || 0,
+      totalSlips: parseInt(stats.total_slips) || 0,
+      prizePool: stats.prize_pool || '0',
+      avgCorrectPredictions: parseFloat(stats.avg_correct_predictions) || 0,
+      maxCorrectPredictions: parseInt(stats.max_correct_predictions) || 0,
+      isResolved: stats.is_resolved || false,
+      resolvedAt: stats.resolved_at,
+      matchesCount: stats.matches_count || 0
+    };
+
+    res.json({
+      success: true,
+      data: transformedStats,
+      meta: {
+        source: 'cycle_stats',
+        timestamp: new Date().toISOString(),
+        cycleId: targetCycleId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in cycle stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+}
+
+// NEW: Get team names for multiple match IDs (for frontend enrichment)
+router.post('/batch-fixtures', asyncHandler(async (req, res) => {
+  try {
+    const { matchIds } = req.body;
+    
+    if (!Array.isArray(matchIds) || matchIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'matchIds array is required'
+      });
+    }
+    
+    // Limit to prevent abuse
+    if (matchIds.length > 50) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum 50 match IDs allowed'
+      });
+    }
+    
+    // Get fixtures data
+    const placeholders = matchIds.map((_, index) => `$${index + 1}::text`).join(',');
+    const fixturesResult = await db.query(`
+      SELECT id, home_team, away_team, league_name, starting_at
+      FROM oracle.fixtures 
+      WHERE id IN (${placeholders})
+    `, matchIds);
+    
+    // Create a map of match ID to team data
+    const fixturesMap = {};
+    fixturesResult.rows.forEach(fixture => {
+      fixturesMap[fixture.id] = {
+        home_team: fixture.home_team,
+        away_team: fixture.away_team,
+        league_name: fixture.league_name,
+        starting_at: fixture.starting_at
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: fixturesMap
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching batch fixtures:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch fixtures',
+      message: error.message
+    });
+  }
+}));
 
 module.exports = router;

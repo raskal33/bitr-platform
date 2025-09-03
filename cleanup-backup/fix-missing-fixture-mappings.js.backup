@@ -1,0 +1,163 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+async function fixMissingFixtureMappings() {
+  console.log('🔧 Fixing missing fixture mappings...\n');
+  
+  try {
+    // 1. Find all pools without fixture mappings
+    console.log('1. Finding pools without fixture mappings...');
+    
+    const poolsWithoutMapping = await db.query(`
+      SELECT p.pool_id, p.market_id, p.fixture_id, p.category, p.odds, p.creator_stake, p.status, p.created_at
+      FROM oracle.pools p
+      LEFT JOIN oracle.fixture_mappings fm ON p.market_id = fm.market_id_hash
+      WHERE p.category = 'football' 
+        AND fm.market_id_hash IS NULL
+        AND p.status IN ('active', 'closed')
+      ORDER BY p.created_at DESC
+    `);
+    
+    console.log(`Found ${poolsWithoutMapping.rows.length} pools without fixture mappings`);
+    
+    if (poolsWithoutMapping.rows.length === 0) {
+      console.log('✅ All pools have fixture mappings!');
+      return;
+    }
+    
+    // 2. Process each pool
+    for (const pool of poolsWithoutMapping.rows) {
+      console.log(`\n2. Processing pool ${pool.pool_id}...`);
+      console.log(`   Market ID: ${pool.market_id}`);
+      console.log(`   Fixture ID: ${pool.fixture_id || 'NULL'}`);
+      console.log(`   Status: ${pool.status}`);
+      
+      // Try to decode the market_id to get fixture information
+      let fixtureId = pool.fixture_id;
+      let homeTeam = null;
+      let awayTeam = null;
+      let leagueName = null;
+      
+      // If we have a fixture_id, try to get team names from fixtures table
+      if (fixtureId) {
+        console.log(`   Looking up fixture ${fixtureId} in fixtures table...`);
+        
+        const fixtureResult = await db.query(`
+          SELECT home_team, away_team, league_name, name
+          FROM oracle.fixtures 
+          WHERE id = $1
+        `, [fixtureId]);
+        
+        if (fixtureResult.rows.length > 0) {
+          const fixture = fixtureResult.rows[0];
+          homeTeam = fixture.home_team;
+          awayTeam = fixture.away_team;
+          leagueName = fixture.league_name;
+          
+          console.log(`   ✅ Found fixture: ${homeTeam} vs ${awayTeam} (${leagueName})`);
+        } else {
+          console.log(`   ❌ Fixture ${fixtureId} not found in fixtures table`);
+        }
+      }
+      
+      // If we still don't have team names, try to decode from market_id
+      if (!homeTeam || !awayTeam) {
+        console.log(`   Trying to decode market_id for team names...`);
+        
+        try {
+          // Try to decode the market_id as a fixture ID
+          const decodedMarketId = ethers.toUtf8String(pool.market_id);
+          if (decodedMarketId && /^\d+$/.test(decodedMarketId)) {
+            fixtureId = decodedMarketId;
+            console.log(`   Decoded market_id to fixture ID: ${fixtureId}`);
+            
+            // Look up this fixture
+            const fixtureResult = await db.query(`
+              SELECT home_team, away_team, league_name, name
+              FROM oracle.fixtures 
+              WHERE id = $1
+            `, [fixtureId]);
+            
+            if (fixtureResult.rows.length > 0) {
+              const fixture = fixtureResult.rows[0];
+              homeTeam = fixture.home_team;
+              awayTeam = fixture.away_team;
+              leagueName = fixture.league_name;
+              
+              console.log(`   ✅ Found fixture: ${homeTeam} vs ${awayTeam} (${leagueName})`);
+            }
+          }
+        } catch (decodeError) {
+          console.log(`   ❌ Could not decode market_id: ${decodeError.message}`);
+        }
+      }
+      
+      // 3. Create fixture mapping if we have team names
+      if (homeTeam && awayTeam) {
+        console.log(`   Creating fixture mapping...`);
+        
+        const insertMapping = `
+          INSERT INTO oracle.fixture_mappings (
+            market_id_hash, fixture_id, home_team, away_team, league_name
+          ) VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (market_id_hash) DO UPDATE SET
+            fixture_id = EXCLUDED.fixture_id,
+            home_team = EXCLUDED.home_team,
+            away_team = EXCLUDED.away_team,
+            league_name = EXCLUDED.league_name
+        `;
+        
+        await db.query(insertMapping, [
+          pool.market_id,
+          fixtureId,
+          homeTeam,
+          awayTeam,
+          leagueName
+        ]);
+        
+        console.log(`   ✅ Created fixture mapping for ${homeTeam} vs ${awayTeam}`);
+        
+        // Update the pool with fixture_id if it's missing
+        if (!pool.fixture_id && fixtureId) {
+          const updatePool = `
+            UPDATE oracle.pools 
+            SET fixture_id = $1 
+            WHERE pool_id = $2
+          `;
+          
+          await db.query(updatePool, [fixtureId, pool.pool_id]);
+          console.log(`   ✅ Updated pool with fixture_id: ${fixtureId}`);
+        }
+      } else {
+        console.log(`   ❌ Could not determine team names for pool ${pool.pool_id}`);
+        console.log(`   This pool will continue to show "Medium odds outcome"`);
+      }
+    }
+    
+    console.log('\n✅ Fixture mapping fix completed!');
+    
+    // 4. Show summary
+    console.log('\n📊 Summary:');
+    const summaryResult = await db.query(`
+      SELECT 
+        COUNT(*) as total_pools,
+        COUNT(fm.market_id_hash) as pools_with_mapping,
+        COUNT(*) - COUNT(fm.market_id_hash) as pools_without_mapping
+      FROM oracle.pools p
+      LEFT JOIN oracle.fixture_mappings fm ON p.market_id = fm.market_id_hash
+      WHERE p.category = 'football' AND p.status IN ('active', 'closed')
+    `);
+    
+    const summary = summaryResult.rows[0];
+    console.log(`   Total football pools: ${summary.total_pools}`);
+    console.log(`   Pools with mapping: ${summary.pools_with_mapping}`);
+    console.log(`   Pools without mapping: ${summary.pools_without_mapping}`);
+    
+  } catch (error) {
+    console.error('❌ Error fixing fixture mappings:', error.message);
+    throw error;
+  }
+}
+
+// Run the fix
+fixMissingFixtureMappings();

@@ -104,7 +104,7 @@ class GasEstimator {
   getPredefinedGasLimit(functionName, args) {
     const limits = {
       // BitredictPool functions
-      'createPool': 1500000n,
+      'createPool': 9000000n, // Increased from 1.5M to 9M based on actual gas consumption analysis
       'placeBet': 500000n,
       'addLiquidity': 400000n,
       'withdrawLiquidity': 300000n,
@@ -321,7 +321,7 @@ class GasEstimator {
       marketId
     ], {
       buffer: 30, // 30% buffer for pool creation
-      maxGasLimit: 2000000, // 2M gas limit
+      maxGasLimit: 9000000, // 9M gas limit for pool creation (increased from 2M)
       ...txOptions
     });
   }

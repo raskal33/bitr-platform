@@ -1,4 +1,5 @@
 const db = require('../db/db');
+const CycleFormatNormalizer = require('./cycle-format-normalizer');
 
 /**
  * Unified Evaluation Service
@@ -11,6 +12,7 @@ const db = require('../db/db');
 class UnifiedEvaluationService {
   constructor() {
     this.serviceName = 'UnifiedEvaluationService';
+    this.formatNormalizer = new CycleFormatNormalizer();
   }
 
   /**
@@ -189,16 +191,23 @@ class UnifiedEvaluationService {
         throw new Error(`No predictions found for slip ${slipId}`);
       }
       
-      let correctCount = 0;
-      let finalScore = 0;
+      // FIXED: Normalize predictions to handle format inconsistencies
+      const normalizedPredictions = this.formatNormalizer.normalizePredictions(predictions, cycleId);
       
-      // Evaluate each prediction
-      for (const prediction of predictions) {
-        const matchId = prediction.matchId;
-        const betType = prediction.betType; // "0" = 1X2, "1" = Over/Under
-        const selection = prediction.selection;
+      if (normalizedPredictions.length === 0) {
+        throw new Error(`No valid predictions after normalization for slip ${slipId}`);
+      }
+      
+      let correctCount = 0;
+      let finalScore = 1000; // ROOT CAUSE FIX: Start with ODDS_SCALING_FACTOR like contract
+      
+      console.log(`📊 Evaluating slip ${slipId} with ${normalizedPredictions.length} normalized predictions`);
+      
+      // Evaluate each normalized prediction
+      for (const prediction of normalizedPredictions) {
+        const { matchId, betType, selection, selectedOdd, selectionHash } = prediction;
         
-        // Get fixture result
+        // Get fixture result - always use CURRENT (90-minute) results
         const resultQuery = `
           SELECT home_score, away_score, result_1x2, result_ou25, outcome_1x2, outcome_ou25
           FROM oracle.fixture_results 
@@ -215,51 +224,55 @@ class UnifiedEvaluationService {
         const result = resultData.rows[0];
         let isCorrect = false;
         
-        if (betType === "0") {
-          // 1X2 prediction
-          const actualResult = result.result_1x2 || result.outcome_1x2;
-          
-          // Map selection hash to result
-          if (selection === "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6" && actualResult === "X") {
-            isCorrect = true; // Draw
-          } else if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62" && actualResult === "1") {
-            isCorrect = true; // Home win
-          } else if (selection === "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5" && actualResult === "2") {
-            isCorrect = true; // Away win
-          } else if (selection === "0x550c64a15031c3064454c19adc6243a6122c138a242eaa098da50bb114fc8d56" && actualResult === "2") {
-            isCorrect = true; // Away win (alternative hash)
-          }
-          
-        } else if (betType === "1") {
-          // Over/Under prediction
-          const actualResult = result.result_ou25 || result.outcome_ou25;
-          
-          if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62" && actualResult === "Over") {
-            isCorrect = true; // Over
-          } else if (selection === "0xe5f3458d553c578199ad9150ab9a1cce5e22e9b34834f66492b28636da59e11b" && actualResult === "Under") {
-            isCorrect = true; // Under
-          }
-        }
+        // Use the normalizer to get the correct result field
+        const resultField = this.formatNormalizer.getResultField(betType);
+        const actualOutcome = result[resultField];
+        
+        // ENHANCED: Use normalized prediction data for consistent evaluation
+        console.log(`  📊 Evaluating ${betType} prediction for match ${matchId}:`);
+        console.log(`    Predicted: ${selection} (hash: ${selectionHash})`);
+        console.log(`    Actual outcome: ${actualOutcome}`);
+        
+        // Compare prediction with actual outcome
+        isCorrect = selection === actualOutcome;
+        
+        console.log(`    Result: ${isCorrect ? '✅ CORRECT' : '❌ WRONG'}`);
         
         if (isCorrect) {
           correctCount++;
-          finalScore += 10; // 10 points per correct prediction
+          // FIXED: Use selectedOdd from normalized prediction
+          finalScore = Math.floor((finalScore * selectedOdd) / 1000);
         }
       }
       
-      // Calculate rank (simplified - could be enhanced with proper leaderboard logic)
-      const rank = correctCount >= 6 ? 1 : correctCount >= 4 ? 2 : correctCount >= 2 ? 3 : null;
+      // Update slip with evaluation results
+      await db.query(`
+        UPDATE oracle.oddyssey_slips 
+        SET 
+          is_evaluated = TRUE,
+          correct_count = $1, 
+          final_score = $2,
+          updated_at = NOW()
+        WHERE slip_id = $3
+      `, [correctCount, finalScore, slipId]);
       
-      return {
-        correctCount,
-        finalScore,
-        rank
-      };
+      console.log(`✅ Slip ${slipId} evaluated: ${correctCount}/10 correct, score: ${finalScore}`);
+      
+      return { correctCount, finalScore };
       
     } catch (error) {
       console.error(`❌ Error evaluating slip ${slipId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Get moneyline result (1, X, 2)
+   */
+  getMoneylineResult(homeScore, awayScore) {
+    if (homeScore > awayScore) return '1';
+    if (homeScore < awayScore) return '2';
+    return 'X';
   }
 
   /**

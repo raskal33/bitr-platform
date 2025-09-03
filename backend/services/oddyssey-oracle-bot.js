@@ -4,6 +4,7 @@ const path = require('path');
 const OddysseyMatchSelector = require('./oddyssey-match-selector');
 const SportMonksService = require('./sportmonks');
 const SchemaSyncBridge = require('./schema-sync-bridge');
+const SimpleBulletproofService = require('./simple-bulletproof-service');
 const db = require('../db/db');
 
 class OddysseyOracleBot {
@@ -62,6 +63,9 @@ class OddysseyOracleBot {
     this.sportmonksService = new SportMonksService();
     this.syncBridge = new SchemaSyncBridge();
     
+    // ROOT CAUSE FIX: Initialize simple bulletproof service
+    this.bulletproofService = new SimpleBulletproofService();
+    
     this.isRunning = false;
   }
 
@@ -75,6 +79,11 @@ class OddysseyOracleBot {
     console.log('🤖 Starting Oddyssey Oracle Bot...');
 
     try {
+      // ROOT CAUSE FIX: Initialize simple bulletproof system first
+      console.log('🛡️ Initializing simple bulletproof system...');
+      const initResult = await this.bulletproofService.initialize();
+      console.log('✅ Simple bulletproof system initialized:', initResult.message);
+
       // Verify contract connection
       const currentCycleId = await this.oddysseyContract.dailyCycleId();
       console.log(`📊 Current Oddyssey cycle: ${currentCycleId}`);
@@ -85,7 +94,7 @@ class OddysseyOracleBot {
       // Check for cycles that need resolution
       await this.checkAndResolveCycles();
 
-      console.log('✅ Oddyssey Oracle Bot started successfully');
+      console.log('✅ Oddyssey Oracle Bot started successfully with simple bulletproof protection');
     } catch (error) {
       console.error('❌ Failed to start Oddyssey Oracle Bot:', error);
       this.isRunning = false;
@@ -140,13 +149,18 @@ class OddysseyOracleBot {
             // Log sync issue for monitoring
             await db.query(`
               INSERT INTO oracle.cycle_health_reports (
-                cycle_id, issue_type, description, severity, created_at
-              ) VALUES ($1, $2, $3, $4, NOW())
+                cycle_id, issue_type, description, severity, created_at, status, total_cycles, missing_cycles, anomalies_count, report_data
+              ) VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9)
             `, [
               contractCycleId,
               'sync_mismatch',
               `Database cycle ${dbCycleId} != contract cycle ${contractCycleId}`,
-              'warning'
+              'warning',
+              'WARNING',
+              0,
+              0,
+              1,
+              JSON.stringify({ sync_issue: { db_cycle: dbCycleId.toString(), contract_cycle: contractCycleId.toString() } }, (key, value) => typeof value === 'bigint' ? value.toString() : value)
             ]);
             
             await db.query('ROLLBACK');
@@ -186,13 +200,18 @@ class OddysseyOracleBot {
         try {
           await db.query(`
             INSERT INTO oracle.cycle_health_reports (
-              cycle_id, issue_type, description, severity, created_at
-            ) VALUES ($1, $2, $3, $4, NOW())
+              cycle_id, issue_type, description, severity, created_at, status, total_cycles, missing_cycles, anomalies_count, report_data
+            ) VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9)
           `, [
             0,
             'creation_failure',
             `Cycle creation failed: ${cycleError.message}`,
-            'critical'
+            'critical',
+            'CRITICAL',
+            0,
+            0,
+            1,
+            JSON.stringify({ error: cycleError.message, stack: cycleError.stack }, (key, value) => typeof value === 'bigint' ? value.toString() : value)
           ]);
         } catch (logError) {
           console.error('Failed to log cycle creation error:', logError);
@@ -208,41 +227,51 @@ class OddysseyOracleBot {
   }
 
   /**
-   * Start a new daily cycle with selected matches
+   * ROOT CAUSE FIX: Start a new daily cycle with bulletproof validation
    */
   async startNewDailyCycle() {
     try {
-      // Get today's date for matches (same day strategy)
+      // Get today's date for matches
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
 
-      console.log(`📅 Selecting matches for ${todayStr}...`);
+      console.log(`🛡️ [BULLETPROOF] Starting cycle creation for ${todayStr}...`);
 
-      // Select 10 optimal matches
-      const matchSelection = await this.matchSelector.selectDailyMatches(today);
-      const { selectedMatches, oddysseyMatches, summary } = matchSelection;
-
-      // Validate selection
+      // Step 1: Get SportMonks fixtures for today
+      let sportMonksFixtures = [];
       try {
-        this.matchSelector.validateMatchSelection(selectedMatches);
-        console.log('✅ Match validation passed');
-      } catch (validationError) {
-        throw new Error(`Match validation failed: ${validationError.message}`);
+        console.log('📡 Fetching SportMonks fixtures...');
+        const fixtures = await this.sportmonksService.getFixturesForDate(todayStr);
+        sportMonksFixtures = fixtures || [];
+        console.log(`📥 Retrieved ${sportMonksFixtures.length} SportMonks fixtures`);
+      } catch (error) {
+        console.warn('⚠️ SportMonks fetch failed, will use database fallback:', error.message);
       }
 
-      console.log('🎯 Selected matches summary:');
-      selectedMatches.forEach((match, i) => {
-        console.log(`   ${i+1}. ${match.homeTeam} vs ${match.awayTeam} (${match.difficulty}) [${match.league}]`);
-      });
+      // Step 2: Create bulletproof cycle
+      const cycleResult = await this.bulletproofService.createBulletproofCycle(todayStr, sportMonksFixtures);
+      
+      if (!cycleResult.success) {
+        throw new Error(`Bulletproof cycle creation failed: ${cycleResult.errors.join(', ')}`);
+      }
 
-      // Send to contract
-      console.log('📤 Sending matches to Oddyssey contract...');
+      console.log(`🛡️ [BULLETPROOF] Cycle ${cycleResult.cycleId} created with ${cycleResult.matchCount} validated matches`);
+
+      // Step 3: Get matches for contract submission
+      const matchesForContract = await this.getContractMatchesFromCycle(cycleResult.cycleId);
+      
+      if (matchesForContract.length !== 10) {
+        throw new Error(`Expected 10 matches for contract, got ${matchesForContract.length}`);
+      }
+
+      // Step 4: Send to contract with bulletproof validation
+      console.log('📤 Sending bulletproof matches to Oddyssey contract...');
       
       // Estimate gas first
-      const gasEstimate = await this.oddysseyContract.startDailyCycle.estimateGas(oddysseyMatches);
+      const gasEstimate = await this.oddysseyContract.startDailyCycle.estimateGas(matchesForContract);
       console.log(`⛽ Gas estimate: ${gasEstimate.toString()}`);
       
-      const tx = await this.oddysseyContract.startDailyCycle(oddysseyMatches, {
+      const tx = await this.oddysseyContract.startDailyCycle(matchesForContract, {
         gasLimit: gasEstimate + 500000n // Add 500k buffer
       });
 
@@ -250,16 +279,16 @@ class OddysseyOracleBot {
       const receipt = await tx.wait();
       
       if (receipt.status === 1) {
-        console.log('✅ New cycle started successfully!');
+        console.log('✅ Bulletproof cycle started successfully on contract!');
         
-        // Store cycle data in our database
-        await this.storeCycleData(receipt, selectedMatches, summary);
+        // Step 5: Update database with transaction hash
+        await this.updateCycleWithTransaction(cycleResult.cycleId, receipt);
         
-        // Get the current cycle ID and sync to oddyssey schema
+        // Step 6: Sync to oddyssey schema
         const currentCycleId = await this.oddysseyContract.dailyCycleId();
         await this.syncBridge.syncCycleFromOracle(currentCycleId.toString());
         
-        // Listen for CycleStarted event
+        // Step 7: Log success event
         const event = receipt.logs.find(log => {
           try {
             const parsed = this.oddysseyContract.interface.parseLog(log);
@@ -271,15 +300,95 @@ class OddysseyOracleBot {
 
         if (event) {
           const parsedEvent = this.oddysseyContract.interface.parseLog(event);
-          console.log(`🎉 Cycle ${parsedEvent.args.cycleId} started, betting ends at ${new Date(Number(parsedEvent.args.endTime) * 1000)}`);
+          console.log(`🎉 [BULLETPROOF] Cycle ${parsedEvent.args.cycleId} started, betting ends at ${new Date(Number(parsedEvent.args.endTime) * 1000)}`);
         }
 
+        // Step 8: Final verification
+        const systemStatus = await this.bulletproofService.getSystemStatus();
+        console.log(`🛡️ [BULLETPROOF] System status: ${systemStatus.statistics.successRate} success rate`);
+
       } else {
-        throw new Error('Transaction failed');
+        throw new Error('Contract transaction failed');
       }
 
     } catch (error) {
-      console.error('❌ Failed to start new cycle:', error);
+      console.error('❌ [BULLETPROOF] Failed to start new cycle:', error);
+      
+      // Log detailed error for monitoring
+      try {
+        const systemStatus = await this.bulletproofService.getSystemStatus();
+        console.error('🔍 System status at failure:', systemStatus);
+      } catch (statusError) {
+        console.error('❌ Could not get system status:', statusError);
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Get contract-formatted matches from bulletproof cycle
+   */
+  async getContractMatchesFromCycle(cycleId) {
+    try {
+      const result = await db.query(`
+        SELECT 
+          fixture_id, home_team, away_team, league_name, match_date,
+          home_odds, draw_odds, away_odds, over_25_odds, under_25_odds, display_order
+        FROM oracle.daily_game_matches dgm
+        JOIN oracle.oddyssey_cycles oc ON DATE(dgm.game_date) = DATE(oc.game_date)
+        WHERE oc.id = $1
+        ORDER BY dgm.display_order ASC
+      `, [cycleId]);
+
+      const matches = result.rows.map(match => {
+        const startTime = Math.floor(new Date(match.match_date).getTime() / 1000);
+        
+        return {
+          id: BigInt(match.fixture_id),
+          startTime: startTime,
+          oddsHome: Math.round(parseFloat(match.home_odds) * 1000),
+          oddsDraw: Math.round(parseFloat(match.draw_odds) * 1000),
+          oddsAway: Math.round(parseFloat(match.away_odds) * 1000),
+          oddsOver: Math.round(parseFloat(match.over_25_odds) * 1000),
+          oddsUnder: Math.round(parseFloat(match.under_25_odds) * 1000),
+          result: {
+            moneyline: 0, // NotSet
+            overUnder: 0  // NotSet
+          }
+        };
+      });
+
+      return matches;
+    } catch (error) {
+      console.error('❌ Error getting contract matches from cycle:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update cycle with transaction details
+   */
+  async updateCycleWithTransaction(cycleId, receipt) {
+    try {
+      await db.query(`
+        UPDATE oracle.oddyssey_cycles 
+        SET 
+          tx_hash = $2,
+          block_number = $3,
+          gas_used = $4,
+          updated_at = NOW()
+        WHERE id = $1
+      `, [
+        cycleId,
+        receipt.hash,
+        receipt.blockNumber,
+        receipt.gasUsed.toString()
+      ]);
+
+      console.log(`✅ Updated cycle ${cycleId} with transaction details`);
+    } catch (error) {
+      console.error('❌ Error updating cycle with transaction:', error);
       throw error;
     }
   }
@@ -477,7 +586,7 @@ class OddysseyOracleBot {
           cycle_end_time = EXCLUDED.cycle_end_time
       `, [
         cycleId.toString(),
-        JSON.stringify(matchIds),
+        JSON.stringify(matchIds, (key, value) => typeof value === 'bigint' ? value.toString() : value),
         receipt.hash,
         new Date(endTime)
       ]);

@@ -1,0 +1,76 @@
+const { ethers } = require('ethers');
+
+// Test the hash decoding functionality
+function testHashDecoding() {
+  console.log('🧪 Testing hash decoding...\n');
+  
+  // Test cases - these are examples of what the predicted outcome hashes should decode to
+  const testCases = [
+    {
+      hash: ethers.keccak256(ethers.toUtf8Bytes("1")),
+      expected: "1",
+      description: "Home win prediction"
+    },
+    {
+      hash: ethers.keccak256(ethers.toUtf8Bytes("2")),
+      expected: "2", 
+      description: "Away win prediction"
+    },
+    {
+      hash: ethers.keccak256(ethers.toUtf8Bytes("X")),
+      expected: "X",
+      description: "Draw prediction"
+    },
+    {
+      hash: ethers.keccak256(ethers.toUtf8Bytes("Over 2.5")),
+      expected: "Over 2.5",
+      description: "Over 2.5 goals prediction"
+    },
+    {
+      hash: ethers.keccak256(ethers.toUtf8Bytes("Under 1.5")),
+      expected: "Under 1.5",
+      description: "Under 1.5 goals prediction"
+    },
+    {
+      hash: ethers.keccak256(ethers.toUtf8Bytes("BTTS Yes")),
+      expected: "BTTS Yes",
+      description: "Both teams to score prediction"
+    }
+  ];
+  
+  testCases.forEach((testCase, index) => {
+    console.log(`Test ${index + 1}: ${testCase.description}`);
+    console.log(`  Hash: ${testCase.hash}`);
+    
+    try {
+      const decoded = ethers.toUtf8String(testCase.hash);
+      console.log(`  Decoded: "${decoded}"`);
+      console.log(`  Expected: "${testCase.expected}"`);
+      
+      if (decoded === testCase.expected) {
+        console.log('  ✅ PASS');
+      } else {
+        console.log('  ❌ FAIL');
+      }
+    } catch (error) {
+      console.log(`  ❌ ERROR: ${error.message}`);
+    }
+    console.log('');
+  });
+  
+  // Test with a real hash from the database (if available)
+  console.log('🔍 Testing with a sample hash from database...');
+  const sampleHash = "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62";
+  
+  try {
+    const decoded = ethers.toUtf8String(sampleHash);
+    console.log(`  Sample hash: ${sampleHash}`);
+    console.log(`  Decoded: "${decoded}"`);
+    console.log('  ✅ Hash decoding works!');
+  } catch (error) {
+    console.log(`  ❌ ERROR: ${error.message}`);
+  }
+}
+
+// Run the test
+testHashDecoding();

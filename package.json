@@ -18,7 +18,7 @@
     "verify:somnia": "cd solidity && npx hardhat verify --network somnia",
     "backend:start": "cd backend && node api/server.js",
     "backend:dev": "cd backend && nodemon api/server.js",
-    "indexer:start": "cd backend && node indexer.js",
+    "indexer:start": "cd backend && node optimized-indexer-v3.js",
     "oddyssey:indexer": "cd backend && node indexer_oddyssey_starter.js",
     "airdrop:indexer": "cd backend && node indexer_airdrop.js",
     "airdrop:scheduler": "cd backend && node cron/airdrop-scheduler.js",

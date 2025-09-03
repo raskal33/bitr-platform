@@ -246,46 +246,57 @@ class FootballOracleBot {
     // Determine outcome based on outcome type - COMPLETE RESOLUTION SYSTEM
     let result;
     switch (market.outcome_type) {
-      // Main match outcome
+      // Moneyline markets (1X2)
       case '1X2':
-        result = market.outcome_1x2 || market.result_1x2;
+        const moneylineResult = market.outcome_1x2 || market.result_1x2;
+        if (moneylineResult === '1') result = 'Home wins';
+        else if (moneylineResult === 'X') result = 'Draw';
+        else if (moneylineResult === '2') result = 'Away wins';
         break;
         
       // Over/Under markets - ALL variations now supported
       case 'OU05':
-        result = market.outcome_ou05;
+        const ou05Result = market.outcome_ou05;
+        result = ou05Result === 'O' ? 'Over 0.5 goals' : 'Under 0.5 goals';
         break;
       case 'OU15':
-        result = market.outcome_ou15;
+        const ou15Result = market.outcome_ou15;
+        result = ou15Result === 'O' ? 'Over 1.5 goals' : 'Under 1.5 goals';
         break;
       case 'OU25':
-        result = market.outcome_ou25 || market.result_ou25;
+        const ou25Result = market.outcome_ou25 || market.result_ou25;
+        result = ou25Result === 'O' ? 'Over 2.5 goals' : 'Under 2.5 goals';
         break;
       case 'OU35':
-        result = market.outcome_ou35;
+        const ou35Result = market.outcome_ou35;
+        result = ou35Result === 'O' ? 'Over 3.5 goals' : 'Under 3.5 goals';
         break;
         
       // Both Teams To Score
       case 'BTTS':
-        result = market.outcome_btts || market.result_btts;
+        const bttsResult = market.outcome_btts || market.result_btts;
+        result = bttsResult === 'Y' ? 'Both teams to score' : 'Not both teams to score';
         break;
         
       // Half-time markets
       case 'HT_1X2':
-        result = market.outcome_ht_result;
+        const ht1x2Result = market.outcome_ht_result;
+        if (ht1x2Result === '1') result = 'Home wins at half-time';
+        else if (ht1x2Result === 'X') result = 'Draw at half-time';
+        else if (ht1x2Result === '2') result = 'Away wins at half-time';
         break;
       case 'HT_OU05':
         // Calculate half-time OU0.5 from half-time scores
         if (market.ht_home_score !== null && market.ht_away_score !== null) {
           const htTotalGoals = market.ht_home_score + market.ht_away_score;
-          result = htTotalGoals > 0.5 ? 'O' : 'U';
+          result = htTotalGoals > 0.5 ? 'Over 0.5 goals at half-time' : 'Under 0.5 goals at half-time';
         }
         break;
       case 'HT_OU15':
         // Calculate half-time OU1.5 from half-time scores
         if (market.ht_home_score !== null && market.ht_away_score !== null) {
           const htTotalGoals = market.ht_home_score + market.ht_away_score;
-          result = htTotalGoals > 1.5 ? 'O' : 'U';
+          result = htTotalGoals > 1.5 ? 'Over 1.5 goals at half-time' : 'Under 1.5 goals at half-time';
         }
         break;
         
@@ -294,7 +305,7 @@ class FootballOracleBot {
         // Fallback calculation if outcome_ou35 is missing
         // IMPORTANT: Uses 90-minute scores only (home_score/away_score exclude extra time/penalties)
         const totalGoals = market.home_score + market.away_score;
-        result = totalGoals > 3.5 ? 'O' : 'U';
+        result = totalGoals > 3.5 ? 'Over 3.5 goals' : 'Under 3.5 goals';
         break;
         
       default:

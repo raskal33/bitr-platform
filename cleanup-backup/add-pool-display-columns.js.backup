@@ -1,0 +1,198 @@
+/**
+ * Add missing columns to oracle.pools table for proper pool display
+ * This script adds columns needed to store readable pool data
+ */
+
+const db = require('./db/db');
+
+async function addPoolDisplayColumns() {
+  try {
+    console.log('🔧 Adding missing columns to oracle.pools table...');
+    
+    // Add columns for readable pool data
+    await db.query(`
+      DO $$ BEGIN
+        -- Add home_team column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS home_team TEXT;
+        
+        -- Add away_team column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS away_team TEXT;
+        
+        -- Add fixture_id column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS fixture_id TEXT;
+        
+        -- Add readable_outcome column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS readable_outcome TEXT;
+        
+        -- Add market_type column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS market_type TEXT;
+        
+        -- Add title column for user-friendly display
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS title TEXT;
+        
+        -- Add binary_selection column for oracle result matching
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS binary_selection TEXT;
+        
+        -- Add creator_side_won column for settlement tracking
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS creator_side_won BOOLEAN;
+        
+        -- Add result column for settlement
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS result TEXT;
+        
+        -- Add result_timestamp column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS result_timestamp TIMESTAMPTZ;
+        
+        -- Add settled_at column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+        
+        -- Add boost_tier column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS boost_tier TEXT DEFAULT 'NONE';
+        
+        -- Add boost_expiry column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS boost_expiry TIMESTAMPTZ;
+        
+        -- Add participant_count column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS participant_count INTEGER DEFAULT 0;
+        
+        -- Add fill_percentage column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS fill_percentage NUMERIC(5,2) DEFAULT 0;
+        
+        -- Add total_volume column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS total_volume NUMERIC(78,0) DEFAULT 0;
+        
+        -- Add bet_count column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS bet_count INTEGER DEFAULT 0;
+        
+        -- Add avg_bet_size column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS avg_bet_size NUMERIC(78,0) DEFAULT 0;
+        
+        -- Add creator_reputation column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS creator_reputation INTEGER DEFAULT 0;
+        
+        -- Add category_rank column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS category_rank INTEGER DEFAULT 0;
+        
+        -- Add is_hot column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS is_hot BOOLEAN DEFAULT FALSE;
+        
+        -- Add last_activity column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ DEFAULT NOW();
+        
+        -- Add trending column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS trending BOOLEAN DEFAULT FALSE;
+        
+        -- Add social_stats column (JSONB for likes, comments, views)
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS social_stats JSONB DEFAULT '{"likes": 0, "comments": 0, "views": 0}'::jsonb;
+        
+        -- Add change_24h column
+        ALTER TABLE oracle.pools ADD COLUMN IF NOT EXISTS change_24h NUMERIC(10,2) DEFAULT 0;
+        
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    
+    console.log('✅ Successfully added all missing columns to oracle.pools table');
+    
+    // Create indexes for better performance
+    await db.query(`
+      DO $$ BEGIN
+        -- Index for home_team and away_team lookups
+        CREATE INDEX IF NOT EXISTS idx_pools_teams ON oracle.pools(home_team, away_team);
+        
+        -- Index for fixture_id lookups
+        CREATE INDEX IF NOT EXISTS idx_pools_fixture_id ON oracle.pools(fixture_id);
+        
+        -- Index for readable_outcome searches
+        CREATE INDEX IF NOT EXISTS idx_pools_readable_outcome ON oracle.pools(readable_outcome);
+        
+        -- Index for market_type filtering
+        CREATE INDEX IF NOT EXISTS idx_pools_market_type ON oracle.pools(market_type);
+        
+        -- Index for boost_tier filtering
+        CREATE INDEX IF NOT EXISTS idx_pools_boost_tier ON oracle.pools(boost_tier);
+        
+        -- Index for trending pools
+        CREATE INDEX IF NOT EXISTS idx_pools_trending ON oracle.pools(trending, created_at DESC);
+        
+        -- Index for hot pools
+        CREATE INDEX IF NOT EXISTS idx_pools_hot ON oracle.pools(is_hot, created_at DESC);
+        
+        -- Index for creator reputation
+        CREATE INDEX IF NOT EXISTS idx_pools_creator_reputation ON oracle.pools(creator_reputation DESC);
+        
+        -- Index for fill percentage
+        CREATE INDEX IF NOT EXISTS idx_pools_fill_percentage ON oracle.pools(fill_percentage DESC);
+        
+        -- Index for total volume
+        CREATE INDEX IF NOT EXISTS idx_pools_total_volume ON oracle.pools(total_volume DESC);
+        
+        -- Index for last activity
+        CREATE INDEX IF NOT EXISTS idx_pools_last_activity ON oracle.pools(last_activity DESC);
+        
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    
+    console.log('✅ Successfully created all indexes for oracle.pools table');
+    
+    // Update existing pools with fixture mapping data
+    console.log('🔄 Updating existing pools with fixture mapping data...');
+    
+    const updateResult = await db.query(`
+      UPDATE oracle.pools p
+      SET 
+        home_team = fm.home_team,
+        away_team = fm.away_team,
+        fixture_id = fm.fixture_id,
+        readable_outcome = fm.predicted_outcome,
+        market_type = fm.market_type,
+        title = CASE 
+          WHEN fm.home_team IS NOT NULL AND fm.away_team IS NOT NULL AND fm.predicted_outcome IS NOT NULL
+          THEN 'Will ' || fm.home_team || ' vs ' || fm.away_team || ' be ' || fm.predicted_outcome || '?'
+          ELSE fm.predicted_outcome
+        END
+      FROM oracle.fixture_mappings fm
+      WHERE p.market_id = fm.market_id_hash
+      AND (p.home_team IS NULL OR p.away_team IS NULL OR p.readable_outcome IS NULL)
+    `);
+    
+    console.log(`✅ Updated ${updateResult.rowCount} existing pools with fixture mapping data`);
+    
+    // Update pools with decoded predicted outcomes where fixture mapping is not available
+    console.log('🔄 Updating pools with decoded predicted outcomes...');
+    
+    const decodeResult = await db.query(`
+      UPDATE oracle.pools 
+      SET readable_outcome = CASE 
+        WHEN readable_outcome IS NULL OR readable_outcome = '' THEN 'Prediction ' || pool_id
+        ELSE readable_outcome
+      END,
+      title = CASE 
+        WHEN title IS NULL OR title = '' THEN 'Prediction ' || pool_id
+        ELSE title
+      END
+      WHERE readable_outcome IS NULL OR readable_outcome = ''
+    `);
+    
+    console.log(`✅ Updated ${decodeResult.rowCount} pools with fallback titles`);
+    
+    console.log('🎉 Pool display columns setup completed successfully!');
+    
+  } catch (error) {
+    console.error('❌ Error adding pool display columns:', error);
+    throw error;
+  }
+}
+
+// Run the migration
+if (require.main === module) {
+  addPoolDisplayColumns()
+    .then(() => {
+      console.log('✅ Migration completed successfully');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('❌ Migration failed:', error);
+      process.exit(1);
+    });
+}
+
+module.exports = { addPoolDisplayColumns };

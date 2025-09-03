@@ -64,16 +64,16 @@ class SlipEvaluationService {
           
           const evaluation = await this.evaluateSlip(slip, matches);
           
-          // Update slip with evaluation results
+          // Update slip with evaluation results including detailed data
           await db.query(`
             UPDATE oracle.oddyssey_slips 
             SET 
               final_score = $1,
               correct_count = $2,
-              is_evaluated = true,
-              updated_at = NOW()
-            WHERE slip_id = $3
-          `, [evaluation.finalScore, evaluation.correctCount, slip.slip_id]);
+              evaluation_data = $3,
+              is_evaluated = true
+            WHERE slip_id = $4
+          `, [evaluation.finalScore, evaluation.correctCount, JSON.stringify(evaluation.evaluationData), slip.slip_id]);
           
           console.log(`✅ ${this.serviceName}: Evaluated slip ${slip.slip_id} - Score: ${evaluation.finalScore}, Correct: ${evaluation.correctCount}`);
           evaluatedCount++;
@@ -110,21 +110,48 @@ class SlipEvaluationService {
    * Evaluate a single slip
    */
   async evaluateSlip(slip, matches) {
-    const predictions = slip.predictions || [];
-    let correctCount = 0;
-    let totalScore = 0;
+    // Handle predictions that might be JSON string or already parsed array
+    let predictions;
+    if (typeof slip.predictions === 'string') {
+      predictions = JSON.parse(slip.predictions || '[]');
+    } else {
+      predictions = slip.predictions || [];
+    }
     
-    for (const prediction of predictions) {
+    let correctCount = 0;
+    let finalScore = 1; // Start with 1 for multiplication
+    const evaluationData = {};
+    
+    for (let i = 0; i < predictions.length; i++) {
+      const prediction = predictions[i];
       const matchResult = await this.evaluatePrediction(prediction, matches);
+      
       if (matchResult.correct) {
         correctCount++;
-        totalScore += matchResult.score;
+        // FIXED: Multiply odds correctly as per oddyssey.sol
+        // Convert odds from scaled format (e.g., 2550 = 2.55) to decimal and multiply
+        const oddsDecimal = parseFloat(matchResult.odds) / 1000;
+        finalScore = finalScore * oddsDecimal;
       }
+      
+      // Store detailed evaluation data for each prediction
+      evaluationData[i] = {
+        isCorrect: matchResult.correct,
+        actualResult: matchResult.actualResult,
+        matchResult: matchResult.matchResult,
+        homeScore: matchResult.homeScore,
+        awayScore: matchResult.awayScore,
+        score: matchResult.score,
+        betType: matchResult.betType,
+        predictedResult: matchResult.predictedResult,
+        odds: matchResult.odds
+      };
     }
     
     return {
-      finalScore: totalScore,
-      correctCount: correctCount
+      finalScore: correctCount > 0 ? Math.round(finalScore * 100) / 100 : 0, // Round to 2 decimal places, 0 if no correct predictions
+      correctCount: correctCount,
+      evaluationData: evaluationData
     };
   }
 
@@ -132,7 +159,42 @@ class SlipEvaluationService {
    * Evaluate a single prediction
    */
   async evaluatePrediction(prediction, matches) {
-    const { fixture_id, market, prediction: selection } = prediction;
+    // Handle different prediction formats
+    let fixture_id, market, selection, odds;
+    
+    if (Array.isArray(prediction)) {
+      // Format: [fixture_id, bet_type, selection_hash, odds]
+      [fixture_id, market, , odds] = prediction;
+      // Convert market type: "0" = 1X2, "1" = OU25
+      const marketType = market === "0" ? "1X2" : market === "1" ? "OU25" : market;
+      // Extract selection from hash or use default
+      selection = this.extractSelectionFromHash(prediction[2], marketType);
+    } else if (typeof prediction === 'object') {
+      // Handle multiple object formats
+      fixture_id = prediction.matchId;
+      odds = prediction.selectedOdd || prediction.odds;
+      
+      // New format with readable betType and selection
+      if (prediction.betType === 'MONEYLINE' || prediction.betType === 'OVER_UNDER') {
+        market = prediction.betType === 'MONEYLINE' ? '1X2' : 'OU25';
+        selection = prediction.selection || prediction.prediction;
+      }
+      // Legacy format with numeric betType
+      else if (prediction.betType === "0" || prediction.betType === "1" || prediction.betType === 0 || prediction.betType === 1) {
+        const marketType = (prediction.betType === "0" || prediction.betType === 0) ? "1X2" : "OU25";
+        market = marketType;
+        selection = this.extractSelectionFromHash(prediction.selection, marketType);
+      }
+      // Handle string betType
+      else {
+        const marketType = prediction.betType === "0" ? "1X2" : prediction.betType === "1" ? "OU25" : prediction.betType;
+        market = marketType;
+        selection = this.extractSelectionFromHash(prediction.selection, marketType);
+      }
+    } else {
+      console.warn(`⚠️ Unknown prediction format:`, prediction);
+      return { correct: false, score: 0, actualResult: 'Unknown', matchResult: 'Unknown', homeScore: 0, awayScore: 0, betType: 'Unknown', predictedResult: 'Unknown', odds: 0 };
+    }
     
     // Find the match in cycle data
     const match = matches.find(m => m.id === fixture_id || m.id === parseInt(fixture_id));
@@ -141,40 +203,143 @@ class SlipEvaluationService {
       return { correct: false, score: 0 };
     }
     
-    // Get actual result from database
+    // Get actual result from fixture_results table (primary source)
     const fixtureResult = await db.query(`
-      SELECT result_info, status
-      FROM oracle.fixtures 
-      WHERE id = $1
+      SELECT 
+        home_score, 
+        away_score, 
+        result_1x2, 
+        result_ou25,
+        evaluation_status
+      FROM oracle.fixture_results 
+      WHERE fixture_id = $1::text
     `, [fixture_id]);
     
-    if (fixtureResult.rows.length === 0 || !fixtureResult.rows[0].result_info) {
-      console.warn(`⚠️ No result found for fixture ${fixture_id}`);
-      return { correct: false, score: 0 };
+    if (fixtureResult.rows.length === 0) {
+      // Fallback to fixtures table
+      const fallbackResult = await db.query(`
+        SELECT result_info
+        FROM oracle.fixtures 
+        WHERE id = $1::text
+      `, [fixture_id]);
+      
+      if (fallbackResult.rows.length === 0 || !fallbackResult.rows[0].result_info) {
+        console.warn(`⚠️ No result found for fixture ${fixture_id}`);
+        return { correct: false, score: 0 };
+      }
+      
+      const resultInfo = fallbackResult.rows[0].result_info;
+      const homeScore = resultInfo.home_score || 0;
+      const awayScore = resultInfo.away_score || 0;
+      const actualResult1X2 = resultInfo.result_1x2;
+      const actualResultOU25 = resultInfo.result_ou25;
+      
+      let isCorrect = false;
+      let score = 0;
+      let actualResult = '';
+      
+      if (market === '1X2' || market === "0") {
+        // Moneyline prediction
+        actualResult = actualResult1X2;
+        isCorrect = selection === actualResult;
+        score = isCorrect ? 10 : 0; // 10 points for correct moneyline
+        
+      } else if (market === 'OU25' || market === "1") {
+        // Over/Under prediction
+        actualResult = actualResultOU25;
+        isCorrect = selection === actualResult;
+        score = isCorrect ? 5 : 0; // 5 points for correct over/under
+      }
+      
+      return { 
+        correct: isCorrect, 
+        score,
+        actualResult: actualResult,
+        matchResult: `${homeScore}-${awayScore}`,
+        homeScore: homeScore,
+        awayScore: awayScore,
+        betType: market,
+        predictedResult: selection,
+        odds: odds
+      };
     }
     
-    const result = fixtureResult.rows[0].result_info;
+    // Use fixture_results data
+    const result = fixtureResult.rows[0];
     const homeScore = result.home_score || 0;
     const awayScore = result.away_score || 0;
     
     let isCorrect = false;
     let score = 0;
+    let actualResult = '';
     
-    if (market === '1X2') {
+    if (market === '1X2' || market === "0") {
       // Moneyline prediction
-      const actualResult = this.getMoneylineResult(homeScore, awayScore);
+      actualResult = result.result_1x2;
       isCorrect = selection === actualResult;
       score = isCorrect ? 10 : 0; // 10 points for correct moneyline
       
-    } else if (market === 'OU25') {
+    } else if (market === 'OU25' || market === "1") {
       // Over/Under prediction
-      const totalGoals = homeScore + awayScore;
-      const actualResult = totalGoals > 2.5 ? 'Over' : 'Under';
+      actualResult = result.result_ou25;
       isCorrect = selection === actualResult;
       score = isCorrect ? 5 : 0; // 5 points for correct over/under
     }
     
-    return { correct: isCorrect, score };
+    return { 
+      correct: isCorrect, 
+      score,
+      actualResult: actualResult,
+      matchResult: `${homeScore}-${awayScore}`,
+      homeScore: homeScore,
+      awayScore: awayScore,
+      betType: market,
+      predictedResult: selection,
+      odds: odds
+    };
+  }
+
+  /**
+   * Extract selection from hash or direct value
+   */
+  extractSelectionFromHash(selectionValue, market) {
+    // If it's already a readable selection, return it
+    if (typeof selectionValue === 'string' && ['1', '2', 'X', 'Over', 'Under'].includes(selectionValue)) {
+      return selectionValue;
+    }
+    
+    // Handle hash-based selections (decode based on market type)
+    if (typeof selectionValue === 'string' && selectionValue.startsWith('0x')) {
+      // This is a hash - decode it based on market type
+      const hashValue = selectionValue.toLowerCase();
+      
+      if (market === '1X2' || market === "0") {
+        // Common hash patterns for 1X2 markets
+        if (hashValue.includes('1') || hashValue.endsWith('1')) return '1';
+        if (hashValue.includes('2') || hashValue.endsWith('2')) return '2';
+        if (hashValue.includes('x') || hashValue.includes('0')) return 'X';
+      } else if (market === 'OU25' || market === "1") {
+        // Common hash patterns for Over/Under markets
+        if (hashValue.includes('over') || hashValue.includes('1')) return 'Over';
+        if (hashValue.includes('under') || hashValue.includes('0')) return 'Under';
+      }
+    }
+    
+    // Handle numeric selections
+    if (typeof selectionValue === 'number' || !isNaN(selectionValue)) {
+      const numValue = parseInt(selectionValue);
+      if (market === '1X2' || market === "0") {
+        if (numValue === 0) return '1';
+        if (numValue === 1) return 'X';
+        if (numValue === 2) return '2';
+      } else if (market === 'OU25' || market === "1") {
+        if (numValue === 0) return 'Under';
+        if (numValue === 1) return 'Over';
+      }
+    }
+    
+    // Fallback - return the original value as string
+    return String(selectionValue);
   }
 
   /**

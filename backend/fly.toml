@@ -44,10 +44,7 @@ primary_region = "fra"
 # Process definitions
 [processes]
   app = "node api/server.js"
-  indexer = "node indexer.js"
-  # Temporarily disabled due to startup timeout issues
-  # indexer_oddyssey = "node indexer_oddyssey.js"
-  # indexer_reputation = "node indexer_reputation.js"
+  indexer = "npm run indexer"
   workers = "node cron/consolidated-workers.js"
 
 # Main API server VM - ONLY API, no background services
@@ -72,36 +69,13 @@ primary_region = "fra"
   auto_stop_machines = false
   min_machines_running = 1
 
-# Temporarily disabled due to startup timeout issues
-# # Oddyssey Indexer VM
-# [[vm]]
-#   processes = ["indexer_oddyssey"]
-#   cpu_kind = "shared"
-#   cpus = 1
-#   memory_mb = 768
-#   region = "fra"
-#   # Disable auto-stopping for indexers to prevent frequent restarts
-#   auto_stop_machines = false
-#   min_machines_running = 1
-
-# # Reputation System Indexer VM
-# [[vm]]
-#   processes = ["indexer_reputation"]
-#   cpu_kind = "shared"
-#   cpus = 1
-#   memory_mb = 768
-#   region = "fra"
-#   # Disable auto-stopping for indexers to prevent frequent restarts
-#   auto_stop_machines = false
-#   min_machines_running = 1
-
-# Workers VM (consolidated background workers) - INCREASED MEMORY FOR FIXTURE FETCHING
+# Workers VM (consolidated background workers with all cron jobs)
 [[vm]]
   processes = ["workers"]
   cpu_kind = "shared"
   cpus = 2
-  memory_mb = 2048  # Doubled from 1024 to handle memory-intensive operations
+  memory_mb = 1024
   region = "fra"
   # Disable auto-stopping for workers to prevent frequent restarts
   auto_stop_machines = false
-  min_machines_running = 1 
+  min_machines_running = 1

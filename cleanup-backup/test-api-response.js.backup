@@ -1,0 +1,44 @@
+#!/usr/bin/env node
+
+/**
+ * Test API Response
+ * Test the current API response to see what data is being returned
+ */
+
+require('dotenv').config();
+const axios = require('axios');
+
+async function testApiResponse() {
+  try {
+    console.log('🧪 Testing API response...');
+    
+    const response = await axios.get('http://localhost:3000/api/guided-markets/pools?limit=10');
+    
+    if (response.data && response.data.data && response.data.data.pools.length > 0) {
+      const pool = response.data.data.pools[0];
+      
+      console.log('📊 Pool Data:');
+      console.log('   Pool ID:', pool.poolId);
+      console.log('   Title:', pool.title || 'NOT SET');
+      console.log('   Home Team:', pool.homeTeam || 'NOT SET');
+      console.log('   Away Team:', pool.awayTeam || 'NOT SET');
+      console.log('   Predicted Outcome:', pool.predictedOutcome);
+      console.log('   Bet Market Type:', pool.betMarketType);
+      console.log('   Odds:', pool.odds);
+      console.log('   Creator Stake:', pool.creatorStake);
+      console.log('   Odds Display:', pool.oddsDisplay || 'NOT SET');
+      
+      console.log('\n🔍 Full Pool Object:');
+      console.log(JSON.stringify(pool, null, 2));
+      
+    } else {
+      console.log('❌ No pools found in API response');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error testing API:', error.message);
+  }
+}
+
+testApiResponse();
+

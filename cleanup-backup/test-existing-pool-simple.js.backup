@@ -1,0 +1,148 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+async function testExistingPoolSimple() {
+  console.log('🧪 Testing existing pool (simple version)...\n');
+  
+  try {
+    // Get the existing pool data
+    const poolResult = await db.query(`
+      SELECT pool_id, predicted_outcome, market_id, category, odds, creator_address, 
+             event_start_time, event_end_time, league, region, status
+      FROM oracle.pools 
+      WHERE status = 'active' 
+      LIMIT 1
+    `);
+    
+    if (poolResult.rows.length === 0) {
+      console.log('❌ No active pools found in database');
+      return;
+    }
+    
+    const pool = poolResult.rows[0];
+    console.log('Found pool:', {
+      poolId: pool.pool_id,
+      marketId: pool.market_id,
+      predictedOutcome: pool.predicted_outcome,
+      category: pool.category,
+      odds: pool.odds,
+      creator: pool.creator_address,
+      league: pool.league
+    });
+    console.log('');
+    
+    // Test the hash decoding logic directly
+    console.log('1. Testing hash decoding...');
+    
+    const predictedOutcomeHash = pool.predicted_outcome;
+    const marketId = pool.market_id;
+    const category = pool.category;
+    const odds = pool.odds;
+    
+    let readableOutcome = predictedOutcomeHash;
+    let betMarketType = null;
+    let homeTeam = null;
+    let awayTeam = null;
+    
+    // Try to decode the marketId to get fixture ID
+    let fixtureId = null;
+    try {
+      if (marketId.startsWith('0x')) {
+        const decodedMarketId = ethers.toUtf8String(marketId);
+        if (decodedMarketId && /^\d+$/.test(decodedMarketId)) {
+          fixtureId = decodedMarketId;
+          console.log(`✅ Decoded marketId to fixture ID: ${fixtureId}`);
+        }
+      } else if (/^\d+$/.test(marketId)) {
+        fixtureId = marketId;
+        console.log(`✅ MarketId is already a fixture ID: ${fixtureId}`);
+      }
+    } catch (e) {
+      console.log(`❌ Could not decode marketId: ${e.message}`);
+    }
+    
+    // Try to get team names from fixture data
+    if (fixtureId && category === 'football') {
+      try {
+        const fixtureResult = await db.query(`
+          SELECT home_team, away_team, league_name 
+          FROM oracle.fixtures 
+          WHERE id = $1
+        `, [fixtureId]);
+        
+        if (fixtureResult.rows.length > 0) {
+          homeTeam = fixtureResult.rows[0].home_team;
+          awayTeam = fixtureResult.rows[0].away_team;
+          console.log(`✅ Found fixture: ${homeTeam} vs ${awayTeam}`);
+          
+          // Create meaningful outcome description
+          readableOutcome = `${homeTeam} vs ${awayTeam}`;
+          betMarketType = "Match Result";
+        } else {
+          console.log(`❌ No fixture found for ID: ${fixtureId}`);
+        }
+      } catch (dbError) {
+        console.log(`❌ Database error: ${dbError.message}`);
+      }
+    }
+    
+    // If we couldn't get team names, try to decode the predicted outcome hash
+    if (!homeTeam || !awayTeam) {
+      console.log('2. Trying to decode predicted outcome hash...');
+      
+      try {
+        const decodedOutcome = ethers.toUtf8String(predictedOutcomeHash);
+        if (decodedOutcome && decodedOutcome.trim() && !decodedOutcome.includes('\u0000')) {
+          console.log(`✅ Decoded predicted outcome: "${decodedOutcome}"`);
+          readableOutcome = decodedOutcome;
+          
+          // Determine bet market type
+          const outcome = decodedOutcome.toLowerCase();
+          if (['1', '2', 'x', 'home', 'away', 'draw'].includes(outcome)) {
+            betMarketType = "Match Result";
+          } else if (['o', 'u', 'over', 'under'].some(term => outcome.includes(term))) {
+            betMarketType = "Goals Over/Under";
+          } else if (['btts', 'both teams', 'yes', 'no'].some(term => outcome.includes(term))) {
+            betMarketType = "Both Teams To Score";
+          } else {
+            betMarketType = "Other";
+          }
+        } else {
+          console.log('❌ Decoded outcome is empty or contains null bytes');
+        }
+      } catch (decodeError) {
+        console.log(`❌ Could not decode predicted outcome hash: ${decodeError.message}`);
+        
+        // Fallback to generic outcome based on odds
+        const oddsDecimal = parseFloat(odds) / 100;
+        if (oddsDecimal >= 2.0) {
+          readableOutcome = "High odds outcome";
+          betMarketType = "Match Result";
+        } else if (oddsDecimal >= 1.5) {
+          readableOutcome = "Medium odds outcome";
+          betMarketType = "Goals Over/Under";
+        } else {
+          readableOutcome = "Low odds outcome";
+          betMarketType = "Double Chance";
+        }
+      }
+    }
+    
+    console.log('');
+    console.log('Final Result:');
+    console.log(`  Readable Outcome: ${readableOutcome}`);
+    console.log(`  Bet Market Type: ${betMarketType}`);
+    console.log(`  Home Team: ${homeTeam || 'Unknown'}`);
+    console.log(`  Away Team: ${awayTeam || 'Unknown'}`);
+    console.log(`  Odds: ${parseFloat(odds) / 100}x`);
+    
+    console.log('');
+    console.log('✅ Test completed!');
+    
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+  }
+}
+
+// Run the test
+testExistingPoolSimple();

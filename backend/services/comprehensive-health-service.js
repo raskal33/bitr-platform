@@ -443,6 +443,83 @@ class ComprehensiveHealthService {
   clearAlertHistory() {
     this.alertHistory = [];
   }
+
+  /**
+   * Run comprehensive health check (alias for getComprehensiveSystemHealth)
+   * Used by cron jobs and monitoring systems
+   */
+  async runComprehensiveHealthCheck() {
+    return await this.getComprehensiveSystemHealth();
+  }
+
+  /**
+   * Generate daily health report
+   */
+  async generateDailyReport() {
+    try {
+      const healthReport = await this.getComprehensiveSystemHealth();
+      
+      const dailyReport = {
+        date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString(),
+        summary: {
+          overallStatus: healthReport.overallStatus,
+          totalServices: Object.keys(healthReport.services || {}).length,
+          healthyServices: Object.values(healthReport.services || {}).filter(s => s.status === 'healthy').length,
+          degradedServices: Object.values(healthReport.services || {}).filter(s => s.status === 'degraded').length,
+          unhealthyServices: Object.values(healthReport.services || {}).filter(s => s.status === 'unhealthy').length,
+          totalAlerts: healthReport.alerts ? healthReport.alerts.length : 0,
+          criticalAlerts: healthReport.alerts ? healthReport.alerts.filter(a => a.severity === 'critical').length : 0,
+          warningAlerts: healthReport.alerts ? healthReport.alerts.filter(a => a.severity === 'warning').length : 0
+        },
+        performance: {
+          errorRate: healthReport.performance ? healthReport.performance.error_rate : 0,
+          requestsPerHour: healthReport.performance ? healthReport.performance.requests_per_hour : 0,
+          averageResponseTime: healthReport.performance ? healthReport.performance.avg_response_time : 0,
+          dbErrorRate: healthReport.performance ? healthReport.performance.db_error_rate : 0
+        },
+        systemMetrics: {
+          memoryUsage: healthReport.system ? Math.round((healthReport.system.memory.used / healthReport.system.memory.total) * 100) : 0,
+          cpuUsage: healthReport.system ? healthReport.system.cpu.usage : 0,
+          diskUsage: healthReport.system ? healthReport.system.disk.usage : 0
+        },
+        topIssues: healthReport.alerts ? healthReport.alerts.slice(0, 5) : [],
+        recommendations: healthReport.recommendations ? healthReport.recommendations.slice(0, 3) : [],
+        trends: healthReport.trends || {},
+        uptime: healthReport.services ? healthReport.services.uptime : 'N/A'
+      };
+
+      await loggingConfig.info('Daily health report generated', {
+        service: 'health-monitor',
+        reportDate: dailyReport.date,
+        overallStatus: dailyReport.summary.overallStatus,
+        totalAlerts: dailyReport.summary.totalAlerts
+      });
+
+      return dailyReport;
+
+    } catch (error) {
+      await loggingConfig.error('Failed to generate daily health report', error, {
+        service: 'health-monitor'
+      });
+      
+      return {
+        date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString(),
+        error: error.message,
+        summary: {
+          overallStatus: 'error',
+          totalServices: 0,
+          healthyServices: 0,
+          degradedServices: 0,
+          unhealthyServices: 0,
+          totalAlerts: 1,
+          criticalAlerts: 1,
+          warningAlerts: 0
+        }
+      };
+    }
+  }
 }
 
 // Export singleton

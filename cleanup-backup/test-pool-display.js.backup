@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+
+/**
+ * Test Pool Display
+ * Test the pool data and outcome parsing logic
+ */
+
+require('dotenv').config();
+const db = require('./db/db');
+
+async function testPoolDisplay() {
+  try {
+    await db.connect();
+    console.log('✅ Database connected');
+    
+    // Get the pool data
+    const result = await db.query(`
+      SELECT 
+        pool_id, creator_address, predicted_outcome, odds, creator_stake,
+        event_start_time, event_end_time, league, category, region,
+        is_private, max_bet_per_user, use_bitr, oracle_type, market_id,
+        status, tx_hash, block_number, created_at
+      FROM oracle.pools 
+      WHERE status = 'active'
+      ORDER BY created_at DESC
+      LIMIT 10
+    `);
+    
+    console.log(`📊 Found ${result.rows.length} pools`);
+    
+    for (const row of result.rows) {
+      console.log('\n🔍 Pool Details:');
+      console.log(`   Pool ID: ${row.pool_id}`);
+      console.log(`   Creator: ${row.creator_address}`);
+      console.log(`   Predicted Outcome: ${row.predicted_outcome}`);
+      console.log(`   Category: ${row.category}`);
+      console.log(`   League: ${row.league}`);
+      console.log(`   Odds: ${row.odds}`);
+      console.log(`   Status: ${row.status}`);
+      
+      // Test outcome parsing logic
+      let readableOutcome = row.predicted_outcome;
+      let betMarketType = null;
+      
+      if (row.category === 'football') {
+        const outcome = readableOutcome.toLowerCase();
+        console.log(`   Testing outcome: "${outcome}"`);
+        
+        if (outcome === 'under_25_goals') {
+          readableOutcome = "Under 2.5 goals";
+          betMarketType = "Goals Over/Under";
+          console.log(`   ✅ Matched: ${readableOutcome} (${betMarketType})`);
+        } else if (['1', 'home'].includes(outcome)) {
+          readableOutcome = "Home wins";
+          betMarketType = "Match Result";
+        } else if (['2', 'away'].includes(outcome)) {
+          readableOutcome = "Away wins";
+          betMarketType = "Match Result";
+        } else if (['x', 'draw'].includes(outcome)) {
+          readableOutcome = "Draw";
+          betMarketType = "Match Result";
+        } else if (['o', 'over'].some(term => outcome.includes(term))) {
+          if (outcome.includes('25') || outcome.includes('2.5')) {
+            readableOutcome = "Over 2.5 goals";
+          } else if (outcome.includes('15') || outcome.includes('1.5')) {
+            readableOutcome = "Over 1.5 goals";
+          } else if (outcome.includes('35') || outcome.includes('3.5')) {
+            readableOutcome = "Over 3.5 goals";
+          } else {
+            readableOutcome = "Over goals";
+          }
+          betMarketType = "Goals Over/Under";
+        } else if (['u', 'under'].some(term => outcome.includes(term))) {
+          if (outcome.includes('25') || outcome.includes('2.5')) {
+            readableOutcome = "Under 2.5 goals";
+          } else if (outcome.includes('15') || outcome.includes('1.5')) {
+            readableOutcome = "Under 1.5 goals";
+          } else if (outcome.includes('35') || outcome.includes('3.5')) {
+            readableOutcome = "Under 3.5 goals";
+          } else {
+            readableOutcome = "Under goals";
+          }
+          betMarketType = "Goals Over/Under";
+        } else {
+          betMarketType = "Other";
+        }
+        
+        console.log(`   Final Outcome: ${readableOutcome}`);
+        console.log(`   Market Type: ${betMarketType}`);
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Error:', error);
+  } finally {
+    await db.end();
+  }
+}
+
+testPoolDisplay();

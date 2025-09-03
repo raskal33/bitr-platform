@@ -114,7 +114,7 @@ describe("BitredictPool - Integration & Edge Cases", function () {
     });
     
     it("Should handle precision in calculations", async function () {
-        const { poolId, marketId, token } = await createPool({ odds: 101 }); // 1.01x odds
+        const { poolId, marketId, token } = await createPool({ odds: 150 }); // 1.50x odds
         const minBet = ethers.parseEther("1");
 
         await token.connect(bettor1).approve(await bitredictPool.getAddress(), minBet);

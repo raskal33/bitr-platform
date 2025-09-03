@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+
+/**
+ * Check Current Indexer State
+ * 
+ * This script checks the current indexer state in the database
+ * to see what block it's currently at.
+ */
+
+async function checkIndexerState() {
+  const db = require('./db/db');
+  
+  try {
+    console.log('🔍 Checking current indexer state...');
+    
+    // Check indexer state table
+    const stateResult = await db.query('SELECT * FROM oracle.indexer_state ORDER BY id DESC LIMIT 1');
+    
+    if (stateResult.rows.length > 0) {
+      const state = stateResult.rows[0];
+      console.log('📊 Current indexer state:');
+      console.log(`   Last indexed block: ${state.last_indexed_block}`);
+      console.log(`   Last processed block: ${state.last_processed_block}`);
+      console.log(`   Total blocks: ${state.total_blocks}`);
+      console.log(`   Total events: ${state.total_events}`);
+      console.log(`   Is processing: ${state.is_processing}`);
+      console.log(`   Start time: ${state.start_time}`);
+      console.log(`   Updated at: ${state.updated_at}`);
+      
+      // Check if it's starting from a very low block
+      const lastBlock = parseInt(state.last_indexed_block);
+      if (lastBlock < 164000000) {
+        console.warn(`⚠️ WARNING: Indexer is at block ${lastBlock} - this is way too low!`);
+        console.log('💡 You should run: node reset-indexer-state.js');
+      } else {
+        console.log('✅ Indexer block looks reasonable');
+      }
+    } else {
+      console.log('📭 No indexer state found in database');
+      console.log('💡 Indexer will start from configured default block');
+    }
+    
+    // Check indexed blocks table
+    const blocksResult = await db.query(`
+      SELECT 
+        MIN(block_number) as min_block,
+        MAX(block_number) as max_block,
+        COUNT(*) as total_indexed_blocks
+      FROM oracle.indexed_blocks
+    `);
+    
+    if (blocksResult.rows.length > 0 && blocksResult.rows[0].total_indexed_blocks > 0) {
+      const blocks = blocksResult.rows[0];
+      console.log('\n📦 Indexed blocks summary:');
+      console.log(`   Min block: ${blocks.min_block}`);
+      console.log(`   Max block: ${blocks.max_block}`);
+      console.log(`   Total indexed blocks: ${blocks.total_indexed_blocks}`);
+    } else {
+      console.log('\n📭 No indexed blocks found');
+    }
+    
+    // Check recent blockchain events
+    const eventsResult = await db.query(`
+      SELECT 
+        MIN(block_number) as min_block,
+        MAX(block_number) as max_block,
+        COUNT(*) as total_events
+      FROM oracle.blockchain_events
+    `);
+    
+    if (eventsResult.rows.length > 0 && eventsResult.rows[0].total_events > 0) {
+      const events = eventsResult.rows[0];
+      console.log('\n📡 Blockchain events summary:');
+      console.log(`   Min block: ${events.min_block}`);
+      console.log(`   Max block: ${events.max_block}`);
+      console.log(`   Total events: ${events.total_events}`);
+    } else {
+      console.log('\n📭 No blockchain events found');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error checking indexer state:', error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+// Run the check
+checkIndexerState();

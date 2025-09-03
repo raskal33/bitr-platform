@@ -1,10 +1,12 @@
 const axios = require('axios');
 const db = require('../db/db');
+const UnifiedResultsStorage = require('./unified-results-storage');
 
 class SportMonksService {
   constructor() {
     this.apiToken = process.env.SPORTMONKS_API_TOKEN;
     this.baseUrl = 'https://api.sportmonks.com/v3/football';
+    this.resultsStorage = new UnifiedResultsStorage();
     
     if (!this.apiToken) {
       throw new Error('SPORTMONKS_API_TOKEN not configured');
@@ -674,8 +676,16 @@ class SportMonksService {
         const fixture = response.data.data;
         if (!fixture) continue;
         
+        // Update fixture status if it has changed
+        const currentStatus = fixture.state?.state || 'NS';
+        await db.query(`
+          UPDATE oracle.fixtures 
+          SET status = $1, updated_at = NOW() 
+          WHERE id = $2 AND status != $1
+        `, [currentStatus, fixtureId]);
+
         // Only process completed matches (including penalty shootouts)
-        if (!['FT', 'AET', 'PEN', 'FT_PEN'].includes(fixture.state?.state)) {
+        if (!['FT', 'AET', 'PEN', 'FT_PEN'].includes(currentStatus)) {
           continue;
         }
         
@@ -733,19 +743,20 @@ class SportMonksService {
             }
           }
           
-          // Ensure both scores are found
-          if (homeScore === null || awayScore === null) {
-            console.log(`⚠️ Incomplete ${description} scores: home=${homeScore}, away=${awayScore}`);
-            return { home: homeScore || 0, away: awayScore || 0 };
-          }
-          
-          return { home: homeScore, away: awayScore };
+                  // ROOT CAUSE FIX: Ensure both scores are found and valid
+        if (homeScore === null || awayScore === null) {
+          console.log(`⚠️ Incomplete ${description} scores: home=${homeScore}, away=${awayScore}`);
+          // Return null instead of 0 to indicate missing data
+          return { home: null, away: null };
+        }
+        
+        return { home: homeScore, away: awayScore };
         };
         
-        // For penalty shootout matches (FT_PEN), calculate 90-minute score from halves
+        // For AET and penalty shootout matches, calculate 90-minute score from halves
         let ftScore;
-        if (fixture.state?.state === 'FT_PEN') {
-          console.log(`🏆 Penalty match detected: ${fixture.id}`);
+        if (fixture.state?.state === 'FT_PEN' || fixture.state?.state === 'AET') {
+          console.log(`🏆 Extra time/penalty match detected: ${fixture.id} (${fixture.state?.state})`);
           
           // Calculate 90-minute score from 1ST_HALF + 2ND_HALF_ONLY (excludes extra time)
           const firstHalf = parseScore(fixture.scores, '1ST_HALF');
@@ -762,7 +773,13 @@ class SportMonksService {
           ftScore = parseScore(fixture.scores, 'CURRENT');
         }
         
-        const htScore = parseScore(fixture.scores, '1ST_HALF');
+        // Parse half-time score with better validation
+        let htScore = parseScore(fixture.scores, '1ST_HALF');
+        
+        // If no 1ST_HALF score, try HT or HALFTIME
+        if (htScore.home === null || htScore.away === null) {
+          htScore = parseScore(fixture.scores, 'HT') || parseScore(fixture.scores, 'HALFTIME') || htScore;
+        }
         
         // Calculate outcomes for Oddyssey (1X2 and O/U 2.5)
         const calculateMoneylineResult = (homeScore, awayScore) => {
@@ -776,6 +793,35 @@ class SportMonksService {
           return totalGoals > 2.5 ? 'Over' : 'Under';
         };
 
+        // ROOT CAUSE FIX: For Oddyssey matches, we CANNOT skip - use fallback data
+        if (ftScore.home === null || ftScore.away === null) {
+          console.log(`⚠️ Missing scores for fixture ${fixture.id} - checking for fallback data`);
+          
+          // Try to get scores from resolution_data in oddyssey_cycles
+          const fallbackScores = await this.getFallbackScoresFromResolution(fixture.id);
+          if (fallbackScores) {
+            ftScore = fallbackScores;
+            console.log(`✅ Using fallback scores: ${ftScore.home}-${ftScore.away}`);
+          } else {
+            // Try alternative score parsing methods
+            console.log(`🔍 Trying alternative score parsing for fixture ${fixture.id}`);
+            
+            // Try to parse from different score descriptions
+            const alternativeScores = this.parseAlternativeScores(fixture.scores, fixture.state?.state);
+            if (alternativeScores && alternativeScores.home !== null && alternativeScores.away !== null) {
+              ftScore = alternativeScores;
+              console.log(`✅ Using alternative scores: ${ftScore.home}-${ftScore.away}`);
+            } else {
+              console.log(`❌ No fallback data available for fixture ${fixture.id} - skipping`);
+              continue;
+            }
+          }
+        }
+
+        // Calculate all market outcomes
+        const ftTotal = ftScore.home + ftScore.away;
+        const htTotal = (htScore.home !== null && htScore.away !== null) ? htScore.home + htScore.away : null;
+        
         const result = {
           fixture_id: fixture.id,
           home_team: homeTeam?.name,
@@ -786,10 +832,21 @@ class SportMonksService {
           ht_away_score: htScore.away || null,
           status: fixture.state?.state,
           match_date: fixture.starting_at,
-          score_type: fullTimeScore.description,
-          // Calculate outcomes immediately
+          score_type: fullTimeScore?.description || 'CURRENT',
+          
+          // Full-time markets
           result_1x2: calculateMoneylineResult(ftScore.home, ftScore.away),
-          result_ou25: calculateOverUnderResult(ftScore.home, ftScore.away)
+          result_ou25: calculateOverUnderResult(ftScore.home, ftScore.away),
+          result_ou35: ftTotal > 3.5 ? 'Over' : 'Under', // 3.5 O/U market
+          result_btts: (ftScore.home > 0 && ftScore.away > 0) ? 'Yes' : 'No',
+          
+          // Half-time markets (only if HT scores available)
+          result_ht_1x2: htTotal !== null ? calculateMoneylineResult(htScore.home, htScore.away) : null,
+          result_ht_ou15: htTotal !== null ? (htTotal > 1.5 ? 'Over' : 'Under') : null, // 1st half 1.5 O/U
+          
+          // Additional calculated fields
+          full_score: `${ftScore.home}-${ftScore.away}`,
+          ht_score: htTotal !== null ? `${htScore.home}-${htScore.away}` : null
         };
         
         results.push(result);
@@ -809,9 +866,24 @@ class SportMonksService {
 
   /**
    * Save fixture results to database with calculated outcomes
+   * FIXED: Use unified results storage for consistency
    */
   async saveFixtureResults(results) {
-    console.log(`💾 Saving ${results.length} fixture results to database...`);
+    console.log(`💾 Saving ${results.length} fixture results using unified storage...`);
+    
+    // Use unified results storage to ensure consistency across all tables
+    const { successCount, errorCount } = await this.resultsStorage.batchProcessResults(results);
+    
+    console.log(`✅ Saved ${successCount}/${results.length} fixture results (${errorCount} errors)`);
+    return { savedCount: successCount, errorCount };
+  }
+
+  /**
+   * Legacy method - kept for backward compatibility
+   * DEPRECATED: Use saveFixtureResults instead
+   */
+  async saveFixtureResultsLegacy(results) {
+    console.log(`💾 Saving ${results.length} fixture results to database (legacy method)...`);
     
     let savedCount = 0;
     
@@ -916,7 +988,142 @@ class SportMonksService {
   }
 
   /**
-   * Calculate all outcomes based on match scores
+   * Parse alternative scores when standard parsing fails
+   */
+  parseAlternativeScores(scores, matchState) {
+    if (!scores || !Array.isArray(scores)) {
+      return null;
+    }
+
+    console.log(`🔍 Available score descriptions: ${scores.map(s => s.description).join(', ')}`);
+
+    // Try different score combinations
+    const scoreCombinations = [
+      // Try 1ST_HALF + 2ND_HALF_ONLY (for extra time matches)
+      () => {
+        const firstHalf = this.parseScoreFromArray(scores, '1ST_HALF');
+        const secondHalf = this.parseScoreFromArray(scores, '2ND_HALF_ONLY');
+        if (firstHalf && secondHalf) {
+          return {
+            home: firstHalf.home + secondHalf.home,
+            away: firstHalf.away + secondHalf.away
+          };
+        }
+        return null;
+      },
+      // Try 1ST_HALF + 2ND_HALF (for regular matches)
+      () => {
+        const firstHalf = this.parseScoreFromArray(scores, '1ST_HALF');
+        const secondHalf = this.parseScoreFromArray(scores, '2ND_HALF');
+        if (firstHalf && secondHalf) {
+          return {
+            home: firstHalf.home + secondHalf.home,
+            away: firstHalf.away + secondHalf.away
+          };
+        }
+        return null;
+      },
+      // Try any score with "CURRENT" or "FT" description
+      () => {
+        const currentScore = this.parseScoreFromArray(scores, 'CURRENT') || this.parseScoreFromArray(scores, 'FT');
+        return currentScore;
+      },
+      // Try the last available score
+      () => {
+        if (scores.length > 0) {
+          const lastScore = scores[scores.length - 1];
+          return this.parseScoreFromArray(scores, lastScore.description);
+        }
+        return null;
+      }
+    ];
+
+    for (const combination of scoreCombinations) {
+      try {
+        const result = combination();
+        if (result && result.home !== null && result.away !== null) {
+          return result;
+        }
+      } catch (error) {
+        console.log(`⚠️ Score combination failed: ${error.message}`);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Parse score from array by description
+   */
+  parseScoreFromArray(scores, description) {
+    const relevantScores = scores.filter(s => s.description === description);
+    
+    if (relevantScores.length === 0) {
+      return null;
+    }
+    
+    let homeScore = null;
+    let awayScore = null;
+    
+    for (const score of relevantScores) {
+      if (score.score && score.score.participant && score.score.goals !== undefined) {
+        const goals = parseInt(score.score.goals);
+        if (score.score.participant === 'home') {
+          homeScore = isNaN(goals) ? 0 : goals;
+        } else if (score.score.participant === 'away') {
+          awayScore = isNaN(goals) ? 0 : goals;
+        }
+      }
+    }
+    
+    if (homeScore === null || awayScore === null) {
+      return null;
+    }
+    
+    return { home: homeScore, away: awayScore };
+  }
+
+  /**
+   * ROOT CAUSE FIX: Get fallback scores from resolution_data in oddyssey_cycles
+   */
+  async getFallbackScoresFromResolution(fixtureId) {
+    try {
+      const db = require('../db/db');
+      
+      // Find cycles that contain this fixture and have resolution_data
+      const cycleResult = await db.query(`
+        SELECT oc.resolution_data
+        FROM oracle.oddyssey_cycles oc
+        JOIN oracle.daily_game_matches dgm ON dgm.cycle_id = oc.cycle_id
+        WHERE dgm.fixture_id = $1 AND oc.resolution_data IS NOT NULL
+        ORDER BY oc.cycle_id DESC
+        LIMIT 1
+      `, [fixtureId]);
+      
+      if (cycleResult.rows.length === 0) {
+        return null;
+      }
+      
+      const resolutionData = JSON.parse(cycleResult.rows[0].resolution_data);
+      const matchData = resolutionData[fixtureId.toString()];
+      
+      if (matchData && matchData.homeScore !== undefined && matchData.awayScore !== undefined) {
+        return {
+          home: parseInt(matchData.homeScore),
+          away: parseInt(matchData.awayScore)
+        };
+      }
+      
+      return null;
+      
+    } catch (error) {
+      console.error(`❌ Error getting fallback scores for ${fixtureId}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate all outcomes based on match scores - Enhanced for guided markets
    */
   calculateOutcomes(result) {
     const homeScore = result.home_score || 0;
@@ -926,6 +1133,7 @@ class SportMonksService {
     
     const totalGoals = homeScore + awayScore;
     const htTotalGoals = htHomeScore + htAwayScore;
+    const hasHtScores = result.ht_home_score !== null && result.ht_away_score !== null;
     
     // Full Time 1X2
     let result_1x2, outcome_1x2;
@@ -940,6 +1148,24 @@ class SportMonksService {
       outcome_1x2 = 'Away';
     }
     
+    // Half Time 1X2 (for guided markets)
+    let result_ht_1x2, outcome_ht_1x2;
+    if (hasHtScores) {
+      if (htHomeScore > htAwayScore) {
+        result_ht_1x2 = '1';
+        outcome_ht_1x2 = 'Home';
+      } else if (htHomeScore === htAwayScore) {
+        result_ht_1x2 = 'X';
+        outcome_ht_1x2 = 'Draw';
+      } else {
+        result_ht_1x2 = '2';
+        outcome_ht_1x2 = 'Away';
+      }
+    } else {
+      result_ht_1x2 = null;
+      outcome_ht_1x2 = null;
+    }
+    
     // Over/Under calculations
     const calculateOU = (total, threshold) => {
       if (total > threshold) return 'Over';
@@ -947,63 +1173,60 @@ class SportMonksService {
       return 'Push'; // Exactly equal
     };
     
+    // Full-time O/U markets
     const result_ou05 = calculateOU(totalGoals, 0.5);
     const result_ou15 = calculateOU(totalGoals, 1.5);
     const result_ou25 = calculateOU(totalGoals, 2.5);
-    const result_ou35 = calculateOU(totalGoals, 3.5);
+    const result_ou35 = calculateOU(totalGoals, 3.5); // For guided markets
     const result_ou45 = calculateOU(totalGoals, 4.5);
     
-    const outcome_ou05 = result_ou05;
-    const outcome_ou15 = result_ou15;
-    const outcome_ou25 = result_ou25;
-    const outcome_ou35 = result_ou35;
-    const outcome_ou45 = result_ou45;
+    // Half-time O/U markets (for guided markets)
+    const result_ht_ou05 = hasHtScores ? calculateOU(htTotalGoals, 0.5) : null;
+    const result_ht_ou15 = hasHtScores ? calculateOU(htTotalGoals, 1.5) : null; // For guided markets
     
-    // Both Teams to Score
+    // Both Teams to Score (only YES for guided markets)
     const result_btts = (homeScore > 0 && awayScore > 0) ? 'Yes' : 'No';
     const outcome_btts = result_btts;
     
-    // Half Time calculations
-    let result_ht, outcome_ht_result;
-    if (htHomeScore > htAwayScore) {
-      result_ht = '1';
-      outcome_ht_result = 'Home';
-    } else if (htHomeScore === htAwayScore) {
-      result_ht = 'X';
-      outcome_ht_result = 'Draw';
-    } else {
-      result_ht = '2';
-      outcome_ht_result = 'Away';
-    }
-    
-    const result_ht_ou05 = calculateOU(htTotalGoals, 0.5);
-    const result_ht_ou15 = calculateOU(htTotalGoals, 1.5);
+    // Legacy half-time result (for backward compatibility)
+    const result_ht = result_ht_1x2;
+    const outcome_ht_result = outcome_ht_1x2;
     const result_ht_goals = htTotalGoals;
     
     // String representations
     const full_score = `${homeScore}-${awayScore}`;
-    const ht_score = result.ht_home_score !== null ? `${htHomeScore}-${htAwayScore}` : null;
+    const ht_score = hasHtScores ? `${htHomeScore}-${htAwayScore}` : null;
     
     return {
+      // Full-time markets
       result_1x2,
       result_ou05,
       result_ou15,
       result_ou25,
-      result_ou35,
+      result_ou35, // 3.5 O/U for guided markets
       result_ou45,
       result_btts,
-      result_ht,
+      
+      // Half-time markets (for guided markets)
+      result_ht_1x2, // HT 1X2 for guided markets
       result_ht_ou05,
-      result_ht_ou15,
+      result_ht_ou15, // 1st half 1.5 O/U for guided markets
+      
+      // Legacy fields
+      result_ht,
       result_ht_goals,
+      
+      // Outcome descriptions
       outcome_1x2,
-      outcome_ou05,
-      outcome_ou15,
-      outcome_ou25,
-      outcome_ou35,
-      outcome_ou45,
+      outcome_ou05: result_ou05,
+      outcome_ou15: result_ou15,
+      outcome_ou25: result_ou25,
+      outcome_ou35: result_ou35,
+      outcome_ou45: result_ou45,
       outcome_ht_result,
       outcome_btts,
+      
+      // Score strings
       full_score,
       ht_score
     };
@@ -1050,6 +1273,7 @@ class SportMonksService {
 
   /**
    * Get completed matches that don't have results in database
+   * FIXED: Also check matches that should be finished by time, not just status
    */
   async getCompletedMatchesWithoutResults() {
     const query = `
@@ -1057,7 +1281,10 @@ class SportMonksService {
       FROM oracle.fixtures f
       LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
       WHERE f.match_date < NOW() - INTERVAL '1 hour'  -- Match finished at least 1 hour ago
-        AND f.status IN ('FT', 'AET', 'PEN')  -- Completed matches
+        AND (
+          f.status IN ('FT', 'AET', 'PEN', 'FT_PEN')  -- Completed matches
+          OR f.match_date < NOW() - INTERVAL '130 minutes'  -- Or should be finished by time (90min + 40min buffer)
+        )
         AND fr.fixture_id IS NULL  -- No results yet
       ORDER BY f.match_date DESC
       LIMIT 50  -- Process in batches

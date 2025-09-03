@@ -1,0 +1,114 @@
+const { ethers } = require('ethers');
+const db = require('./db/db');
+
+async function testFixtureMapping() {
+  console.log('🧪 Testing fixture mapping solution...\n');
+  
+  try {
+    // 1. First, let's add a test fixture mapping
+    console.log('1. Adding test fixture mapping...');
+    
+    const testFixtureId = "19448482"; // KV Kortrijk vs Koninklijke Lierse Sportkring
+    const testMarketId = ethers.keccak256(ethers.solidityPacked(['uint256'], [testFixtureId]));
+    const testHomeTeam = "KV Kortrijk";
+    const testAwayTeam = "Koninklijke Lierse Sportkring";
+    const testLeague = "Belgian Pro League";
+    
+    const insertQuery = `
+      INSERT INTO oracle.fixture_mappings (
+        market_id_hash, fixture_id, home_team, away_team, league_name
+      ) VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (market_id_hash) DO UPDATE SET
+        fixture_id = EXCLUDED.fixture_id,
+        home_team = EXCLUDED.home_team,
+        away_team = EXCLUDED.away_team,
+        league_name = EXCLUDED.league_name
+    `;
+    
+    await db.query(insertQuery, [testMarketId, testFixtureId, testHomeTeam, testAwayTeam, testLeague]);
+    console.log(`✅ Added test mapping: ${testMarketId} -> ${testFixtureId}`);
+    console.log('');
+    
+    // 2. Test the mapping lookup
+    console.log('2. Testing mapping lookup...');
+    
+    const lookupQuery = `
+      SELECT fixture_id, home_team, away_team, league_name 
+      FROM oracle.fixture_mappings 
+      WHERE market_id_hash = $1
+    `;
+    
+    const mappingResult = await db.query(lookupQuery, [testMarketId]);
+    
+    if (mappingResult.rows.length > 0) {
+      const mapping = mappingResult.rows[0];
+      console.log(`✅ Found mapping:`);
+      console.log(`   Fixture ID: ${mapping.fixture_id}`);
+      console.log(`   Home Team: ${mapping.home_team}`);
+      console.log(`   Away Team: ${mapping.away_team}`);
+      console.log(`   League: ${mapping.league_name}`);
+    } else {
+      console.log('❌ No mapping found');
+    }
+    console.log('');
+    
+    // 3. Test the decodePredictedOutcome function
+    console.log('3. Testing decodePredictedOutcome function...');
+    
+    const GuidedMarketService = require('./services/guided-market-service');
+    const guidedMarketService = new GuidedMarketService();
+    
+    // Test with a known hash for "1" (home win)
+    const samplePredictedOutcome = "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62";
+    
+    const result = await guidedMarketService.decodePredictedOutcome(
+      samplePredictedOutcome,
+      'football',
+      150, // 1.5x odds
+      testMarketId
+    );
+    
+    console.log('Decode Result:', result);
+    console.log('');
+    
+    // 4. Test with the existing pool in the database
+    console.log('4. Testing with existing pool...');
+    
+    const existingPoolResult = await db.query(`
+      SELECT pool_id, predicted_outcome, market_id, category, odds
+      FROM oracle.pools 
+      WHERE status = 'active' 
+      LIMIT 1
+    `);
+    
+    if (existingPoolResult.rows.length > 0) {
+      const existingPool = existingPoolResult.rows[0];
+      console.log('Existing pool:', {
+        poolId: existingPool.pool_id,
+        marketId: existingPool.market_id,
+        predictedOutcome: existingPool.predicted_outcome,
+        category: existingPool.category,
+        odds: existingPool.odds
+      });
+      
+      // Try to decode the existing pool
+      const existingResult = await guidedMarketService.decodePredictedOutcome(
+        existingPool.predicted_outcome,
+        existingPool.category,
+        existingPool.odds,
+        existingPool.market_id
+      );
+      
+      console.log('Existing pool decode result:', existingResult);
+    }
+    
+    console.log('');
+    console.log('✅ Fixture mapping test completed!');
+    
+  } catch (error) {
+    console.error('❌ Error testing fixture mapping:', error.message);
+  }
+}
+
+// Run the test
+testFixtureMapping();

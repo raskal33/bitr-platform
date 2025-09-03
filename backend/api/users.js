@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/db');
+const { ethers } = require('ethers');
 
 // Get user profile and basic stats
 router.get('/:address', async (req, res) => {
@@ -93,6 +94,78 @@ router.get('/:address', async (req, res) => {
   }
 });
 
+// Enhanced profile endpoint with refunds and prizes
+router.get('/:address/profile', async (req, res) => {
+  try {
+    const { address } = req.params;
+    
+    // Validate address format
+    if (!address || !address.match(/^0x[a-fA-F0-9]{40}$/)) {
+      return res.status(400).json({ success: false, error: 'Invalid wallet address format' });
+    }
+    
+    // Get refundable pools (closed pools with no bettor stakes)
+    const refundablePools = await db.query(`
+      SELECT 
+        pool_id,
+        creator_stake,
+        created_at,
+        category,
+        league
+      FROM oracle.pools 
+      WHERE creator_address = $1 
+        AND status = 'closed' 
+        AND total_bettor_stake = '0'
+      ORDER BY created_at DESC
+    `, [address.toLowerCase()]);
+    
+    // Get claimable Oddyssey prizes (evaluated slips with 7+ correct predictions)
+    const claimablePrizes = await db.query(`
+      SELECT 
+        slip_id,
+        cycle_id,
+        leaderboard_rank,
+        final_score,
+        correct_count,
+        placed_at,
+        (correct_count >= 7) as is_eligible
+      FROM oracle.oddyssey_slips 
+      WHERE player_address = $1 
+        AND is_evaluated = true 
+        AND prize_claimed = false
+        AND leaderboard_rank <= 3
+        AND correct_count >= 7
+      ORDER BY placed_at DESC
+    `, [address.toLowerCase()]);
+    
+    // Calculate total refundable amount
+    const totalRefundable = refundablePools.rows.reduce((sum, pool) => {
+      const weiAmount = BigInt(pool.creator_stake);
+      const bitrAmount = Number(weiAmount) / 1e18;
+      return sum + bitrAmount;
+    }, 0);
+    
+    res.json({
+      success: true,
+      data: {
+        refunds: {
+          pools: refundablePools.rows,
+          totalAmount: totalRefundable,
+          count: refundablePools.rows.length
+        },
+        prizes: {
+          slips: claimablePrizes.rows,
+          count: claimablePrizes.rows.length
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching enhanced profile:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch profile data' });
+  }
+});
+
 // Get user badges
 router.get('/:address/badges', async (req, res) => {
   try {
@@ -106,32 +179,30 @@ router.get('/:address/badges', async (req, res) => {
     // Query user badges from database
     const result = await db.query(`
       SELECT 
-        id,
+        badge_id,
         badge_type,
-        badge_category,
-        title,
-        description,
-        icon_name,
+        badge_name,
+        badge_description,
+        badge_icon,
         rarity,
         earned_at,
-        true as is_active
+        is_active
       FROM core.user_badges 
       WHERE user_address = $1
       ORDER BY earned_at DESC
     `, [address.toLowerCase()]);
     
     const badges = result.rows.map(badge => ({
-      id: badge.id,
-      badge_type: badge.badge_type,
-      badge_category: badge.badge_category,
-      title: badge.title,
-      description: badge.description,
-      icon_name: badge.icon_name,
+      id: badge.badge_id,
+      type: badge.badge_type,
+      name: badge.badge_name,
+      description: badge.badge_description,
+      icon: badge.badge_icon,
       rarity: badge.rarity,
-      earned_at: badge.earned_at,
-      is_active: badge.is_active
+      earnedAt: badge.earned_at,
+      isActive: badge.is_active
     }));
-
+    
     res.json(badges);
   } catch (error) {
     console.error('Error fetching user badges:', error);
@@ -153,15 +224,13 @@ router.get('/:address/activity', async (req, res) => {
     // Query user activity from database
     const result = await db.query(`
       SELECT 
-        id,
+        activity_id,
         activity_type,
         description,
         amount,
-        pool_id,
-        category,
         timestamp,
-        block_number,
-        tx_hash
+        related_pool_id,
+        related_slip_id
       FROM core.user_activity 
       WHERE user_address = $1
       ORDER BY timestamp DESC
@@ -169,17 +238,15 @@ router.get('/:address/activity', async (req, res) => {
     `, [address.toLowerCase(), parseInt(limit)]);
     
     const activities = result.rows.map(activity => ({
-      id: activity.id,
-      activity_type: activity.activity_type,
+      id: activity.activity_id,
+      type: activity.activity_type,
       description: activity.description,
-      amount: activity.amount ? `${activity.amount} STT` : null,
-      pool_id: activity.pool_id,
-      category: activity.category,
+      amount: activity.amount,
       timestamp: activity.timestamp,
-      block_number: activity.block_number,
-      tx_hash: activity.tx_hash
+      relatedPoolId: activity.related_pool_id,
+      relatedSlipId: activity.related_slip_id
     }));
-
+    
     res.json(activities);
   } catch (error) {
     console.error('Error fetching user activity:', error);
@@ -197,32 +264,30 @@ router.get('/:address/category-performance', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid wallet address format' });
     }
     
-    // Query user category performance from database
+    // Query category performance from database
     const result = await db.query(`
       SELECT 
         category,
         total_bets,
         won_bets,
         total_volume,
-        profit_loss,
         avg_bet_size,
-        best_streak
-      FROM core.user_category_performance 
+        win_rate
+      FROM core.category_performance 
       WHERE user_address = $1
       ORDER BY total_volume DESC
     `, [address.toLowerCase()]);
     
-    const categoryPerformance = result.rows.map(category => ({
-      category: category.category,
-      total_bets: parseInt(category.total_bets) || 0,
-      won_bets: parseInt(category.won_bets) || 0,
-      total_volume: parseFloat(category.total_volume) || 0,
-      profit_loss: parseFloat(category.profit_loss) || 0,
-      avg_bet_size: parseFloat(category.avg_bet_size) || 0,
-      best_streak: parseInt(category.best_streak) || 0
+    const categories = result.rows.map(cat => ({
+      category: cat.category,
+      totalBets: parseInt(cat.total_bets) || 0,
+      wonBets: parseInt(cat.won_bets) || 0,
+      totalVolume: parseFloat(cat.total_volume) || 0,
+      avgBetSize: parseFloat(cat.avg_bet_size) || 0,
+      winRate: parseFloat(cat.win_rate) || 0
     }));
-
-    res.json(categoryPerformance);
+    
+    res.json(categories);
   } catch (error) {
     console.error('Error fetching category performance:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch category performance' });

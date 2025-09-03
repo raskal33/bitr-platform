@@ -68,28 +68,30 @@ class OddysseyScheduler {
       console.log('⏰ Running daily cycle creation job...');
       
       try {
-        const result = await this.oddysseyManager.startDailyCycle();
+        // Use the new retry logic with built-in retries
+        const result = await this.oddysseyManager.startDailyCycleWithRetry(3);
         console.log(`✅ Daily cycle created successfully:`, result);
         
         // Send notification if webhook configured
         await this.sendNotification('cycle_started', result);
         
       } catch (error) {
-        console.error('❌ Failed to create daily cycle:', error);
+        console.error('❌ Failed to create daily cycle after all retries:', error);
         
         // Send error notification
         await this.sendNotification('cycle_start_failed', { error: error.message });
         
-        // Retry in 1 hour if failed
-        setTimeout(async () => {
-          console.log('🔄 Retrying daily cycle creation...');
-          try {
-            await this.oddysseyManager.startDailyCycle();
-            console.log('✅ Daily cycle created on retry');
-          } catch (retryError) {
-            console.error('❌ Retry also failed:', retryError);
+        // Check cycle sync status and alert if needed
+        try {
+          const syncStatus = await this.oddysseyManager.checkCycleSync();
+          if (!syncStatus.isSynced) {
+            console.error('🚨 CYCLE SYNC ISSUE DETECTED!');
+            console.error(`DB Cycle: ${syncStatus.dbCycleId}, Contract Cycle: ${syncStatus.contractCycleId}`);
+            await this.sendNotification('cycle_sync_issue', syncStatus);
           }
-        }, 60 * 60 * 1000); // 1 hour
+        } catch (syncError) {
+          console.error('❌ Failed to check cycle sync status:', syncError);
+        }
       }
     }, {
       scheduled: true,

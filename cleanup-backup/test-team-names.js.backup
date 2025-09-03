@@ -1,0 +1,60 @@
+const GuidedMarketService = require('./services/guided-market-service');
+
+async function testTeamNames() {
+  console.log('🧪 Testing team names retrieval...\n');
+  
+  const guidedMarketService = new GuidedMarketService();
+  
+  try {
+    // Test the decodePredictedOutcome method with a real marketId
+    console.log('1. Testing decodePredictedOutcome with real fixture ID...');
+    
+    const realFixtureId = "19448482"; // KV Kortrijk vs Koninklijke Lierse Sportkring
+    const samplePredictedOutcome = "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62";
+    
+    const result = await guidedMarketService.decodePredictedOutcome(
+      samplePredictedOutcome,
+      'football',
+      150, // 1.5x odds
+      realFixtureId
+    );
+    
+    console.log('Result:', result);
+    console.log('');
+    
+    // Test with a different prediction
+    console.log('2. Testing with different prediction...');
+    
+    const result2 = await guidedMarketService.decodePredictedOutcome(
+      "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6", // This is the hash for "1"
+      'football',
+      200, // 2.0x odds
+      realFixtureId
+    );
+    
+    console.log('Result 2:', result2);
+    console.log('');
+    
+    // Test with another real fixture
+    console.log('3. Testing with another real fixture...');
+    
+    const realFixtureId2 = "19450228"; // Eastleigh vs Gateshead
+    const result3 = await guidedMarketService.decodePredictedOutcome(
+      samplePredictedOutcome,
+      'football',
+      150,
+      realFixtureId2
+    );
+    
+    console.log('Result 3:', result3);
+    console.log('');
+    
+    console.log('✅ Team names test completed!');
+    
+  } catch (error) {
+    console.error('❌ Error testing team names:', error.message);
+  }
+}
+
+// Run the test
+testTeamNames();

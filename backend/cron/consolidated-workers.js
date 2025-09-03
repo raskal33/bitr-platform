@@ -3,6 +3,10 @@ const cron = require('node-cron');
 const { fork } = require('child_process');
 const path = require('path');
 
+// Import coordination services
+const cronCoordinator = require('../services/cron-coordinator');
+const masterCoordinator = require('./master-coordinator');
+
 console.log('🚀 Starting consolidated background workers...');
 
 // Initialize database first
@@ -104,6 +108,51 @@ const jobs = {
     schedule: null, // Runs continuously via system monitor
     script: path.join(__dirname, '../services/cycle-monitor.js'),
     description: 'Cycle Monitor (Continuous)'
+  },
+  fixture_mapping_maintainer: {
+    schedule: '*/10 * * * *', // Every 10 minutes (self-healing metadata)
+    script: path.join(__dirname, 'fixture-mapping-maintainer-cron.js'),
+    description: 'Fixture Mapping Maintainer'
+  },
+  auto_evaluation: {
+    schedule: '0,30 * * * *', // Every 30 minutes (at :00 and :30)
+    script: path.join(__dirname, 'auto-evaluation-cron.js'),
+    description: 'Auto Evaluation (Resolved Cycles)'
+  },
+  fixture_status_updater: {
+    schedule: '*/10 * * * *', // Every 10 minutes (offset from mapping maintainer)
+    script: path.join(__dirname, 'fixture-status-updater.js'),
+    description: 'Fixture Status Updater (Live Match Status)'
+  },
+  results_resolver: {
+    schedule: '*/20 * * * *', // Every 20 minutes (offset to prevent conflicts)
+    script: path.join(__dirname, 'results-resolver-process.js'),
+    description: 'Results Resolver (Oddyssey Cycles)'
+  },
+  airdrop_scheduler: {
+    schedule: '0 2 * * *', // Once daily at 2 AM UTC (after main operations)
+    script: path.join(__dirname, 'airdrop-scheduler.js'),
+    description: 'Airdrop Scheduler (Eligibility Calculation)'
+  },
+  football_oracle_bot: {
+    schedule: null, // Runs continuously
+    script: path.join(__dirname, 'football-oracle-bot-process.js'),
+    description: 'Football Oracle Bot (Continuous)'
+  },
+  crypto_oracle_bot: {
+    schedule: null, // Runs continuously
+    script: path.join(__dirname, 'crypto-oracle-bot-process.js'),
+    description: 'Crypto Oracle Bot (Continuous)'
+  },
+  health_monitoring: {
+    schedule: null, // Runs continuously with internal cron schedules
+    script: path.join(__dirname, 'health-monitoring-cron.js'),
+    description: 'Health Monitoring System (Comprehensive)'
+  },
+  reputation_sync: {
+    schedule: null, // Runs continuously with internal cron schedules
+    script: path.join(__dirname, 'reputation-sync-cron.js'),
+    description: 'Reputation Sync Service (Rankings & Cleanup)'
   }
 };
 
@@ -142,8 +191,10 @@ function runJob(jobName, jobConfig) {
     // Heavy operations that need more time
     if (jobName === 'oracle_cron' || jobName === 'unified_results_manager') {
       timeoutMinutes = 30; // 30 minutes for heavy operations
-    } else if (jobName === 'fixtures_scheduler') {
-      timeoutMinutes = 20; // 20 minutes for fixtures fetching
+    } else if (jobName === 'fixtures_scheduler' || jobName === 'airdrop_scheduler') {
+      timeoutMinutes = 20; // 20 minutes for fixtures fetching and airdrop calculations
+    } else if (jobName === 'results_resolver' || jobName === 'auto_evaluation') {
+      timeoutMinutes = 15; // 15 minutes for results processing
     }
     
     // Kill child process after timeout to prevent hanging (for scheduled jobs only)
@@ -177,6 +228,11 @@ function runJob(jobName, jobConfig) {
 // Initialize database and then schedule all jobs
 async function startWorkers() {
   try {
+    // Initialize coordination system first
+    console.log('🎯 Initializing cron coordination system...');
+    await cronCoordinator.initialize();
+    console.log('✅ Cron coordination system initialized');
+    
     // Initialize database first
     await initializeDatabase();
     

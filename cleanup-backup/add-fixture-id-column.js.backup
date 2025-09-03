@@ -1,0 +1,50 @@
+const db = require('./db/db');
+
+async function addFixtureIdColumn() {
+  try {
+    console.log('🔧 Adding fixture_id column to oracle.pools table...');
+    
+    // Check if the column already exists
+    const checkColumnQuery = `
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'pools' 
+        AND table_schema = 'oracle' 
+        AND column_name = 'fixture_id'
+    `;
+    
+    const checkResult = await db.query(checkColumnQuery);
+    
+    if (checkResult.rows.length > 0) {
+      console.log('✅ fixture_id column already exists');
+      return;
+    }
+    
+    // Add the fixture_id column
+    const addColumnQuery = `
+      ALTER TABLE oracle.pools 
+      ADD COLUMN fixture_id VARCHAR(50)
+    `;
+    
+    await db.query(addColumnQuery);
+    console.log('✅ Added fixture_id column to oracle.pools table');
+    
+    // Add an index for better performance
+    const addIndexQuery = `
+      CREATE INDEX IF NOT EXISTS idx_pools_fixture_id 
+      ON oracle.pools(fixture_id)
+    `;
+    
+    await db.query(addIndexQuery);
+    console.log('✅ Added index on fixture_id column');
+    
+    console.log('✅ Migration completed successfully!');
+    
+  } catch (error) {
+    console.error('❌ Error adding fixture_id column:', error.message);
+    throw error;
+  }
+}
+
+// Run the migration
+addFixtureIdColumn();

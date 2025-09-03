@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+
+/**
+ * Test Indexer Configuration
+ * 
+ * This script tests the optimized indexer v3 configuration
+ * to ensure it starts from the correct block.
+ */
+
+const OptimizedIndexerV3 = require('./optimized-indexer-v3');
+
+async function testIndexerConfig() {
+  console.log('🧪 Testing Optimized Indexer V3 Configuration...');
+  
+  try {
+    // Create indexer instance
+    const indexer = new OptimizedIndexerV3();
+    
+    // Initialize (this will load state and set starting block)
+    await indexer.initialize();
+    
+    // Check the starting block
+    const startingBlock = indexer.state.lastIndexedBlock;
+    console.log(`📊 Indexer starting block: ${startingBlock}`);
+    
+    // Verify it's not starting from 0 or a very low block
+    if (startingBlock < 164000000) {
+      console.warn(`⚠️ Warning: Starting block ${startingBlock} seems too low!`);
+      console.log('💡 Consider running the reset script: node reset-indexer-state.js');
+    } else {
+      console.log('✅ Starting block looks good!');
+    }
+    
+    // Get current blockchain block for comparison
+    const currentBlock = await indexer.rpcManager.getBlockNumber();
+    const blocksToIndex = currentBlock - startingBlock;
+    
+    console.log(`🌐 Current blockchain block: ${currentBlock}`);
+    console.log(`📈 Blocks to index: ${blocksToIndex}`);
+    
+    if (blocksToIndex > 100000) {
+      console.warn(`⚠️ Warning: ${blocksToIndex} blocks to index might take a while`);
+    } else {
+      console.log('✅ Reasonable number of blocks to index');
+    }
+    
+    // Calculate estimated time
+    const blocksPerSecond = 5; // Conservative estimate
+    const estimatedSeconds = blocksToIndex / blocksPerSecond;
+    const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+    
+    console.log(`⏱️ Estimated indexing time: ~${estimatedMinutes} minutes`);
+    
+    // Stop the indexer (we're just testing)
+    indexer.stop();
+    
+    console.log('🎉 Configuration test complete!');
+    
+  } catch (error) {
+    console.error('❌ Error testing indexer configuration:', error);
+    process.exit(1);
+  }
+}
+
+// Run the test
+testIndexerConfig();
