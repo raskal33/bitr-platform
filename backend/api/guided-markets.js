@@ -737,7 +737,7 @@ router.post('/football/prepare', async (req, res) => {
       matchDate,
       outcome,
       predictedOutcome,
-      selection, // NEW: Binary choice (YES/NO, OVER/UNDER, HOME/DRAW/AWAY)
+      selection, // Binary choice (YES/NO, OVER/UNDER, HOME/DRAW/AWAY)
       odds,
       creatorStake,
       useBitr = false,
@@ -746,11 +746,14 @@ router.post('/football/prepare', async (req, res) => {
       maxBetPerUser = 0
     } = req.body;
 
+    // Map predictedOutcome to selection if selection is not provided
+    const finalSelection = selection || predictedOutcome;
+
     // Validate required fields
-    if (!fixtureId || !homeTeam || !awayTeam || !league || !matchDate || !outcome || !predictedOutcome || !selection || !odds || !creatorStake) {
+    if (!fixtureId || !homeTeam || !awayTeam || !league || !matchDate || !outcome || !finalSelection || !odds || !creatorStake) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: fixtureId, homeTeam, awayTeam, league, matchDate, outcome, predictedOutcome, selection, odds, creatorStake'
+        error: 'Missing required fields: fixtureId, homeTeam, awayTeam, league, matchDate, outcome, selection/predictedOutcome, odds, creatorStake'
       });
     }
 
@@ -764,10 +767,10 @@ router.post('/football/prepare', async (req, res) => {
       'Half Time Result': ['HOME', 'DRAW', 'AWAY']
     };
 
-    if (validSelections[outcome] && !validSelections[outcome].includes(selection.toUpperCase())) {
+    if (validSelections[outcome] && !validSelections[outcome].includes(finalSelection.toUpperCase())) {
       return res.status(400).json({
         success: false,
-        error: `Invalid selection "${selection}" for outcome type "${outcome}". Valid selections: ${validSelections[outcome].join(', ')}`
+        error: `Invalid selection "${finalSelection}" for outcome type "${outcome}". Valid selections: ${validSelections[outcome].join(', ')}`
       });
     }
 
@@ -849,7 +852,7 @@ router.post('/football/prepare', async (req, res) => {
         predictedOutcome: predictedOutcome,
         readableOutcome: `${homeTeam} vs ${awayTeam}`,
         marketType: outcome, // This is the exact market type like "Over/Under 2.5"
-        binarySelection: selection.toUpperCase(), // NEW: The binary choice (OVER/UNDER, YES/NO, etc.)
+        binarySelection: finalSelection.toUpperCase(), // The binary choice (OVER/UNDER, YES/NO, etc.)
         oddsDecimal: odds / 100,
         creatorStakeWei: stakeAmountWei.toString(),
         paymentToken: useBitr ? 'BITR' : 'STT',
@@ -894,7 +897,7 @@ router.post('/football/prepare', async (req, res) => {
         league,
         outcome, // The market type like "Over/Under 2.5"
         predictedOutcome, // The exact user choice like "Over 2.5 goals"
-        selection: selection.toUpperCase(), // The binary choice (OVER/UNDER, YES/NO, etc.)
+        selection: finalSelection.toUpperCase(), // The binary choice (OVER/UNDER, YES/NO, etc.)
         odds: odds / 100,
         creatorStake,
         useBitr,
