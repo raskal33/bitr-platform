@@ -729,6 +729,12 @@ router.get('/health', async (req, res) => {
  */
 router.post('/football/prepare', async (req, res) => {
   try {
+    console.log('🎯 Football market prepare request received:', {
+      body: req.body,
+      headers: req.headers['content-type'],
+      method: req.method,
+      url: req.url
+    });
     const {
       fixtureId,
       homeTeam,
@@ -749,11 +755,34 @@ router.post('/football/prepare', async (req, res) => {
     // Map predictedOutcome to selection if selection is not provided
     const finalSelection = selection || predictedOutcome;
 
-    // Validate required fields
-    if (!fixtureId || !homeTeam || !awayTeam || !league || !matchDate || !outcome || !finalSelection || !odds || !creatorStake) {
+    // Validate required fields with detailed error messages
+    const missingFields = [];
+    if (!fixtureId) missingFields.push('fixtureId');
+    if (!homeTeam) missingFields.push('homeTeam');
+    if (!awayTeam) missingFields.push('awayTeam');
+    if (!league) missingFields.push('league');
+    if (!matchDate) missingFields.push('matchDate');
+    if (!outcome) missingFields.push('outcome');
+    if (!finalSelection) missingFields.push('selection/predictedOutcome');
+    if (!odds) missingFields.push('odds');
+    if (!creatorStake) missingFields.push('creatorStake');
+    
+    if (missingFields.length > 0) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: fixtureId, homeTeam, awayTeam, league, matchDate, outcome, selection/predictedOutcome, odds, creatorStake'
+        error: `Missing required fields: ${missingFields.join(', ')}`,
+        receivedData: {
+          fixtureId,
+          homeTeam,
+          awayTeam,
+          league,
+          matchDate,
+          outcome,
+          predictedOutcome,
+          selection,
+          odds,
+          creatorStake
+        }
       });
     }
 
