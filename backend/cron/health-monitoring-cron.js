@@ -68,12 +68,9 @@ class HealthMonitoringCron {
         console.log('🚨 Critical health issues detected:', healthReport.criticalIssues);
         
         // Send alert
-        await this.alertingSystem.sendAlert({
-          type: 'critical',
-          title: 'Critical System Health Issues',
-          message: `Detected ${healthReport.criticalIssues.length} critical issues`,
-          details: healthReport.criticalIssues
-        });
+        await this.alertingSystem.triggerAlert('critical_health_issues', 'critical', 
+          `Detected ${healthReport.criticalIssues.length} critical issues`, 
+          healthReport.criticalIssues);
       }
       
       // Check for warnings
@@ -87,12 +84,9 @@ class HealthMonitoringCron {
       console.error('❌ Health check failed:', error);
       
       // Send alert about health check failure
-      await this.alertingSystem.sendAlert({
-        type: 'error',
-        title: 'Health Check System Failure',
-        message: 'The health monitoring system itself has failed',
-        details: error.message
-      });
+      await this.alertingSystem.triggerAlert('health_check_system_failure', 'critical', 
+        'The health monitoring system itself has failed', 
+        { error: error.message });
     }
   }
 
@@ -106,19 +100,13 @@ class HealthMonitoringCron {
       
       // Check for critical issues
       if (systemStatus.status === 'critical') {
-        await this.alertingSystem.sendAlert({
-          type: 'critical',
-          title: 'Critical System Status',
-          message: `System status is critical: ${systemStatus.summary.criticalHealth} critical checks failing`,
-          details: systemStatus
-        });
+        await this.alertingSystem.triggerAlert('critical_system_status', 'critical', 
+          `System status is critical: ${systemStatus.summary.criticalHealth} critical checks failing`, 
+          systemStatus);
       } else if (systemStatus.status === 'degraded') {
-        await this.alertingSystem.sendAlert({
-          type: 'warning',
-          title: 'Degraded System Status',
-          message: `System status is degraded: ${systemStatus.summary.degradedChecks} checks degraded`,
-          details: systemStatus
-        });
+        await this.alertingSystem.triggerAlert('degraded_system_status', 'warning', 
+          `System status is degraded: ${systemStatus.summary.degradedChecks} checks degraded`, 
+          systemStatus);
       }
       
       // Check for specific health check failures
@@ -127,12 +115,9 @@ class HealthMonitoringCron {
       );
       
       if (criticalFailures.length > 0) {
-        await this.alertingSystem.sendAlert({
-          type: 'warning',
-          title: 'Critical Health Check Failures',
-          message: `${criticalFailures.length} critical health checks are failing`,
-          details: criticalFailures
-        });
+        await this.alertingSystem.triggerAlert('critical_health_check_failures', 'warning', 
+          `${criticalFailures.length} critical health checks are failing`, 
+          criticalFailures);
       }
       
     } catch (error) {
@@ -150,12 +135,9 @@ class HealthMonitoringCron {
       const report = await this.healthService.generateDailyReport();
       
       // Send daily report
-      await this.alertingSystem.sendAlert({
-        type: 'info',
-        title: 'Daily Health Report',
-        message: 'System health summary for the past 24 hours',
-        details: report
-      });
+      await this.alertingSystem.triggerAlert('daily_health_report', 'info', 
+        'System health summary for the past 24 hours', 
+        report);
       
       console.log('✅ Daily health report generated and sent');
       
