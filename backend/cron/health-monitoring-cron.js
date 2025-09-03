@@ -101,24 +101,37 @@ class HealthMonitoringCron {
    */
   async runSystemMonitoring() {
     try {
-      const metrics = await this.systemMonitor.collectMetrics();
+      // Get system status instead of non-existent collectMetrics
+      const systemStatus = this.systemMonitor.getSystemStatus();
       
-      // Check for resource issues
-      if (metrics.memory && metrics.memory.usagePercent > 90) {
+      // Check for critical issues
+      if (systemStatus.status === 'critical') {
+        await this.alertingSystem.sendAlert({
+          type: 'critical',
+          title: 'Critical System Status',
+          message: `System status is critical: ${systemStatus.summary.criticalHealth} critical checks failing`,
+          details: systemStatus
+        });
+      } else if (systemStatus.status === 'degraded') {
         await this.alertingSystem.sendAlert({
           type: 'warning',
-          title: 'High Memory Usage',
-          message: `Memory usage at ${metrics.memory.usagePercent}%`,
-          details: metrics.memory
+          title: 'Degraded System Status',
+          message: `System status is degraded: ${systemStatus.summary.degradedChecks} checks degraded`,
+          details: systemStatus
         });
       }
       
-      if (metrics.cpu && metrics.cpu.usagePercent > 95) {
+      // Check for specific health check failures
+      const criticalFailures = systemStatus.healthChecks.filter(h => 
+        h.critical && h.status !== 'healthy'
+      );
+      
+      if (criticalFailures.length > 0) {
         await this.alertingSystem.sendAlert({
           type: 'warning',
-          title: 'High CPU Usage',
-          message: `CPU usage at ${metrics.cpu.usagePercent}%`,
-          details: metrics.cpu
+          title: 'Critical Health Check Failures',
+          message: `${criticalFailures.length} critical health checks are failing`,
+          details: criticalFailures
         });
       }
       
