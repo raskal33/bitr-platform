@@ -1,8 +1,8 @@
 const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 
-module.exports = buildModule("BitredictPoolModule", (m) => {
-  // Use the real BitredictToken contract (deployed separately)
-  const bitrToken = m.getParameter("bitrToken", "0x0000000000000000000000000000000000000000"); // Replace with actual BitredictToken address
+module.exports = buildModule("BitrPoolModule", (m) => {
+  // Use the real BitrToken contract (deployed separately)
+  const bitrToken = m.getParameter("bitrToken", "0x0000000000000000000000000000000000000000"); // Replace with actual BitrToken address
   
   // Use the real GuidedOracle contract (deployed separately)
   const guidedOracle = m.getParameter("guidedOracle", "0x0000000000000000000000000000000000000000"); // Replace with actual GuidedOracle address
@@ -11,10 +11,10 @@ module.exports = buildModule("BitredictPoolModule", (m) => {
   // The actual OptimisticOracle will be deployed separately and connected later
   const optimisticOracle = m.getParameter("optimisticOracle", "0x0000000000000000000000000000000000000000");
   
-  // Deploy the main BitredictPool contract (STT is native, no token contract needed)
+  // Deploy the main BitrPool contract (MON is native, no token contract needed)
   const feeCollector = m.getParameter("feeCollector", "0x0000000000000000000000000000000000000000"); // Replace with actual fee collector address
   
-  const bitredictPool = m.contract("BitredictPool", [
+  const bitrPool = m.contract("BitrPool", [
     bitrToken,
     feeCollector,
     guidedOracle,
@@ -25,6 +25,6 @@ module.exports = buildModule("BitredictPoolModule", (m) => {
     bitrToken, 
     guidedOracle,
     optimisticOracle,
-    bitredictPool 
+    bitrPool 
   };
 }); 

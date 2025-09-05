@@ -67,9 +67,10 @@ if (!GuidedOracleABI) {
 
 class EnhancedBitredictIndexer {
   constructor() {
-    // Initialize RPC Manager with working Somnia endpoints only
+    // Initialize RPC Manager with Monad Testnet endpoints
     this.rpcManager = new RpcManager([
-      'https://rpc.ankr.com/somnia_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205'
+      'https://testnet-rpc.monad.xyz/',
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/'
     ], {
       maxRetries: 5,
       baseDelay: 2000,

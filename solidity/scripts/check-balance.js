@@ -6,7 +6,7 @@ async function main() {
   const provider = ethers.provider;
   
   console.log("📝 Deployer account:", deployerAddress);
-  console.log("💰 Account balance:", ethers.formatEther(await provider.getBalance(deployerAddress)), "STT");
+  console.log("💰 Account balance:", ethers.formatEther(await provider.getBalance(deployerAddress)), "MON");
 
   // Check if we're on the correct network
   const network = await provider.getNetwork();

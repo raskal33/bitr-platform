@@ -1,5 +1,6 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv/config");
+require("hardhat-contract-sizer");
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -8,38 +9,56 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 200,
+        runs: 1, // Lower runs for smaller contract size
       },
       viaIR: true,
     },
   },
   networks: {
-    somnia: {
-      url: "https://dream-rpc.somnia.network/",
-      chainId: 50312,
+    monad: {
+      url: "https://testnet-rpc.monad.xyz/",
+      chainId: 10143,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
-      gasPrice: 8000000000, // 8 gwei
+      // Monad-specific gas settings
+      gasPrice: 52000000000, // 52 gwei (50 base + 2 priority)
+      gas: 30000000, // 30M gas limit per transaction
+      blockGasLimit: 150000000, // 150M gas per block
+      timeout: 60000, // 60s timeout for faster blocks
     },
-    "somnia": {
-      url: "https://dream-rpc.somnia.network/",
-      chainId: 50312,
+    "monad-testnet": {
+      url: "https://testnet-rpc.monad.xyz/",
+      chainId: 10143,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
-      gasPrice: 8000000000, // 8 gwei
+      // Monad-specific gas settings  
+      gasPrice: 52000000000, // 52 gwei (50 base + 2 priority)
+      gas: 30000000, // 30M gas limit per transaction
+      blockGasLimit: 150000000, // 150M gas per block
+      timeout: 60000, // 60s timeout for faster blocks
+      // EIP-1559 settings
+      maxFeePerGas: 52000000000, // 52 gwei
+      maxPriorityFeePerGas: 2000000000, // 2 gwei
     },
   },
   etherscan: {
     apiKey: {
-      somnia: "no-api-key-needed"
+      monad: "no-api-key-needed"
     },
     customChains: [
       {
-        network: "somnia",
-        chainId: 50312,
+        network: "monad",
+        chainId: 10143,
         urls: {
-          apiURL: "https://shannon-explorer.somnia.network/api",
-          browserURL: "https://shannon-explorer.somnia.network"
+          apiURL: "https://testnet.monadexplorer.com/api",
+          browserURL: "https://testnet.monadexplorer.com"
         }
       }
     ]
+  },
+  contractSizer: {
+    alphaSort: true,
+    disambiguatePaths: false,
+    runOnCompile: false,
+    strict: false,
+    only: [':Oddyssey$', ':BitrPool$'],
   }
 };

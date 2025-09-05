@@ -43,6 +43,38 @@ class Web3Service {
     this.bitrTokenContract = null;
     this.gasEstimator = null;
     this.isInitialized = false;
+    
+    // Monad-specific gas settings
+    this.monadGasSettings = {
+      baseFee: config.blockchain.monad.baseFee,
+      priorityFee: config.blockchain.monad.priorityFee,
+      maxGasLimit: config.blockchain.monad.maxGasLimit,
+      gasCharging: config.blockchain.monad.gasCharging, // 'gas_limit'
+    };
+  }
+
+  /**
+   * Get Monad-optimized gas settings for transactions
+   * @param {number} estimatedGas - Estimated gas from ethers
+   * @returns {Object} Gas settings optimized for Monad
+   */
+  getMonadGasSettings(estimatedGas) {
+    // Add 20% buffer but stay within Monad limits
+    const gasLimit = Math.min(
+      Math.floor(estimatedGas * 1.2),
+      this.monadGasSettings.maxGasLimit
+    );
+    
+    const baseFee = BigInt(this.monadGasSettings.baseFee);
+    const priorityFee = BigInt(this.monadGasSettings.priorityFee);
+    
+    return {
+      gasLimit,
+      maxFeePerGas: baseFee + priorityFee,
+      maxPriorityFeePerGas: priorityFee,
+      // Note: Monad charges gas_limit, not gas_used
+      estimatedCost: ethers.formatEther(BigInt(gasLimit) * (baseFee + priorityFee))
+    };
   }
 
   /**
@@ -461,7 +493,7 @@ class Web3Service {
   }
 
   /**
-   * Get BitredictStaking contract instance
+   * Get BitrStaking contract instance
    */
   async getStakingContract() {
     if (this.stakingContract) {
@@ -477,18 +509,18 @@ class Web3Service {
     try {
       // Try multiple possible paths for the ABI (Docker container paths)
       const possiblePaths = [
-        './solidity/artifacts/contracts/BitredictStaking.sol/BitredictStaking.json',
-        '../solidity/artifacts/contracts/BitredictStaking.sol/BitredictStaking.json',
-        '../../solidity/artifacts/contracts/BitredictStaking.sol/BitredictStaking.json',
-        path.join(__dirname, '../solidity/artifacts/contracts/BitredictStaking.sol/BitredictStaking.json'),
-        path.join(__dirname, '../../solidity/artifacts/contracts/BitredictStaking.sol/BitredictStaking.json')
+        './solidity/artifacts/contracts/BitrStaking.sol/BitrStaking.json',
+        '../solidity/artifacts/contracts/BitrStaking.sol/BitrStaking.json',
+        '../../solidity/artifacts/contracts/BitrStaking.sol/BitrStaking.json',
+        path.join(__dirname, '../solidity/artifacts/contracts/BitrStaking.sol/BitrStaking.json'),
+        path.join(__dirname, '../../solidity/artifacts/contracts/BitrStaking.sol/BitrStaking.json')
       ];
       
       let abiLoaded = false;
       for (const abiPath of possiblePaths) {
         try {
           BitredictStakingABI = require(abiPath).abi;
-          console.log(`✅ BitredictStaking ABI loaded from: ${abiPath}`);
+          console.log(`✅ BitrStaking ABI loaded from: ${abiPath}`);
           abiLoaded = true;
           break;
         } catch (pathError) {
@@ -500,8 +532,8 @@ class Web3Service {
         throw new Error('Could not load ABI from any path');
       }
     } catch (error) {
-      console.warn('⚠️ BitredictStaking contract artifacts not found, using fallback ABI');
-      // Complete fallback ABI matching actual BitredictStaking contract
+      console.warn('⚠️ BitrStaking contract artifacts not found, using fallback ABI');
+      // Complete fallback ABI matching actual BitrStaking contract
       BitredictStakingABI = [
         // Core staking functions
         "function stake(uint256 _amount, uint8 _tierId, uint8 _durationOption) external",
@@ -576,7 +608,7 @@ class Web3Service {
     }
     this.stakingContract = new ethers.Contract(contractAddress, BitredictStakingABI, this.wallet);
     
-    console.log('✅ BitredictStaking contract initialized:', contractAddress);
+    console.log('✅ BitrStaking contract initialized:', contractAddress);
     return this.stakingContract;
   }
 

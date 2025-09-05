@@ -237,6 +237,9 @@ class BitredictAPI {
     // Faucet routes (NEW)
     this.app.use('/api/faucet', require('./faucet'));
 
+    // Terms routes (NEW)
+    this.app.use('/api/terms', require('./terms'));
+
     // Staking routes (NEW)
     this.app.use('/api/staking', require('./staking'));
 

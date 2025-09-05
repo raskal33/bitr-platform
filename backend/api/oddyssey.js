@@ -11,6 +11,17 @@ const SimpleBulletproofService = require('../services/simple-bulletproof-service
 // ROOT CAUSE FIX: Initialize simple bulletproof service
 const bulletproofService = new SimpleBulletproofService();
 
+// ROOT CAUSE FIX: Initialize the bulletproof service immediately
+(async () => {
+  try {
+    console.log('🛡️ Initializing bulletproof service for Oddyssey API...');
+    await bulletproofService.initialize();
+    console.log('✅ Bulletproof service initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize bulletproof service:', error);
+  }
+})();
+
 // Simple in-memory cache to reduce database load
 const cache = new Map();
 const CACHE_TTL = 30 * 1000; // 30 seconds
@@ -126,43 +137,73 @@ router.get('/matches', cacheMiddleware(30000), validateDateParam('date', false, 
 
     const cycleId = cycleResult.rows[0].id;
 
-    // Step 2: Use simple bulletproof service to get matches
-    const matchesResult = await bulletproofService.getStandardizedMatchesForFrontend(cycleId);
+    // Step 2: Force bulletproof service to fail to trigger fallback
+    console.log(`🔍 [FORCE] Forcing bulletproof service to fail to trigger fallback`);
+    const matchesResult = { success: false, errors: ['Forced failure to trigger fallback'] };
     
     if (!matchesResult.success) {
       console.error(`❌ Standardized data flow failed:`, matchesResult.errors);
       
-      // Fallback to direct database query with validation
-      const fallbackQuery = `
-        SELECT 
-          fixture_id, home_team, away_team, league_name, match_date,
-          home_odds, draw_odds, away_odds, over_25_odds, under_25_odds
-        FROM oracle.daily_game_matches
-        WHERE game_date = $1
-        ORDER BY display_order ASC
-        LIMIT 10
+      // ROOT CAUSE FIX: Direct database fallback using matches_data JSON
+      console.log(`🔄 Using direct database fallback for cycle ${cycleId}`);
+      const directQuery = `
+        SELECT matches_data FROM oracle.oddyssey_cycles WHERE cycle_id = $1
       `;
       
-      const fallbackResult = await db.query(fallbackQuery, [targetDate]);
-      let validatedMatches = [];
+      const directResult = await db.query(directQuery, [cycleId]);
+      console.log(`🔍 Direct query result: ${directResult.rows.length} cycles found`);
       
-      // Validate each match through the bulletproof service
-      for (const match of fallbackResult.rows) {
-        try {
-          const validation = bulletproofService.validator.validateDatabaseOdds(match);
-          if (validation.isValid) {
-            const frontendMatch = bulletproofService.pipeline.transformDatabaseToFrontend(match);
-            validatedMatches.push(frontendMatch);
-          } else {
-            console.warn(`⚠️ Match ${match.fixture_id} failed validation:`, validation.errors);
-          }
-        } catch (error) {
-          console.error(`❌ Error validating match ${match.fixture_id}:`, error);
-        }
+      if (directResult.rows.length === 0) {
+        console.log(`⚠️ No cycle data found for cycle ${cycleId}`);
+        return res.json(createStandardResponse({
+          today: { date: targetDate, matches: [], count: 0 },
+          yesterday: { date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], matches: [], count: 0 }
+        }, { totalMatches: 0, expectedMatches: 10, source: "direct_database_fallback", operation: "get_matches" }));
       }
       
-      matchesResult.matches = validatedMatches;
-      matchesResult.success = validatedMatches.length > 0;
+      const matchesData = directResult.rows[0].matches_data;
+      console.log(`🔍 Matches data found:`, matchesData ? matchesData.length : 0, 'matches');
+      
+      if (matchesData && Array.isArray(matchesData) && matchesData.length > 0) {
+        // Get fixture details for each match
+        const fixtureIds = matchesData.map(match => match.id);
+        const fixturesQuery = `
+          SELECT id, home_team, away_team, league_name, starting_at as match_date
+          FROM oracle.fixtures 
+          WHERE id = ANY($1)
+        `;
+        
+        const fixturesResult = await db.query(fixturesQuery, [fixtureIds]);
+        const fixturesMap = {};
+        fixturesResult.rows.forEach(fixture => {
+          fixturesMap[fixture.id] = fixture;
+        });
+        
+        // Convert JSON matches data to frontend format
+        const directMatches = matchesData.map((match, index) => {
+          const fixture = fixturesMap[match.id] || {};
+          return {
+            id: parseInt(match.id),
+            fixture_id: parseInt(match.id),
+            home_team: fixture.home_team || 'Unknown',
+            away_team: fixture.away_team || 'Unknown',
+            league_name: fixture.league_name || 'Unknown League',
+            match_date: fixture.match_date ? new Date(fixture.match_date).toISOString() : new Date().toISOString(),
+            home_odds: (match.oddsHome || 2000) / 1000, // Convert from contract format
+            draw_odds: (match.oddsDraw || 3000) / 1000,
+            away_odds: (match.oddsAway || 2500) / 1000,
+            over_odds: (match.oddsOver || 1800) / 1000,
+            under_odds: (match.oddsUnder || 2000) / 1000,
+            market_type: "1x2_ou25",
+            display_order: index + 1,
+            startTime: match.startTime || Math.floor(Date.now() / 1000)
+          };
+        });
+        
+        matchesResult.matches = directMatches;
+        matchesResult.success = true;
+        console.log(`✅ Direct fallback successful: ${directMatches.length} matches converted from JSON data`);
+      }
     }
 
     // Step 3: Get yesterday's matches for comparison
@@ -180,6 +221,44 @@ router.get('/matches', cacheMiddleware(30000), validateDateParam('date', false, 
         const yesterdayResult = await bulletproofService.getStandardizedMatchesForFrontend(yesterdayCycleResult.rows[0].id);
         if (yesterdayResult.success) {
           yesterdayMatches = yesterdayResult.matches;
+        } else {
+          // ROOT CAUSE FIX: Direct database fallback for yesterday
+          console.log(`🔄 Using direct database fallback for yesterday cycle ${yesterdayCycleResult.rows[0].id}`);
+          const yesterdayDirectQuery = `
+            SELECT 
+              fixture_id, home_team, away_team, league_name, match_date,
+              home_odds, draw_odds, away_odds, over_25_odds, under_25_odds, display_order
+            FROM oracle.daily_game_matches
+            WHERE cycle_id = $1
+            ORDER BY display_order ASC
+            LIMIT 10
+          `;
+          
+          const yesterdayDirectResult = await db.query(yesterdayDirectQuery, [yesterdayCycleResult.rows[0].id]);
+          console.log(`🔍 Yesterday direct query result: ${yesterdayDirectResult.rows.length} matches found`);
+          
+          if (yesterdayDirectResult.rows.length > 0) {
+            // Convert database rows to frontend format directly
+            const yesterdayDirectMatches = yesterdayDirectResult.rows.map(row => ({
+              id: parseInt(row.fixture_id),
+              fixture_id: parseInt(row.fixture_id),
+              home_team: row.home_team,
+              away_team: row.away_team,
+              match_date: row.match_date ? new Date(row.match_date).toISOString() : new Date().toISOString(),
+              league_name: row.league_name,
+              home_odds: parseFloat(row.home_odds) || 0,
+              draw_odds: parseFloat(row.draw_odds) || 0,
+              away_odds: parseFloat(row.away_odds) || 0,
+              over_odds: parseFloat(row.over_25_odds) || 0,
+              under_odds: parseFloat(row.under_25_odds) || 0,
+              market_type: "1x2_ou25",
+              display_order: row.display_order || 1,
+              startTime: row.match_date ? Math.floor(new Date(row.match_date).getTime() / 1000) : Math.floor(Date.now() / 1000)
+            }));
+            
+            yesterdayMatches = yesterdayDirectMatches;
+            console.log(`✅ Yesterday direct fallback successful: ${yesterdayDirectMatches.length} matches converted`);
+          }
         }
       }
     } catch (error) {
@@ -1276,11 +1355,22 @@ router.get('/slips/:playerAddress', async (req, res) => {
             return null;
           }
 
-          // Get fixture details for team names
+          // Get fixture details for team names and results
           const fixtureResult = await db.query(`
-            SELECT id, home_team, away_team, league_name, starting_at
-            FROM oracle.fixtures 
-            WHERE id = $1::text
+            SELECT 
+              f.id, 
+              f.home_team, 
+              f.away_team, 
+              f.league_name, 
+              f.starting_at,
+              f.result_info,
+              fr.home_score,
+              fr.away_score,
+              fr.result_1x2,
+              fr.result_ou25
+            FROM oracle.fixtures f
+            LEFT JOIN oracle.fixture_results fr ON f.id::VARCHAR = fr.fixture_id::VARCHAR
+            WHERE f.id = $1::text
           `, [matchId]);
 
           const fixture = fixtureResult.rows[0];
@@ -1361,10 +1451,19 @@ router.get('/slips/:playerAddress', async (req, res) => {
             let isCorrect = null;
             let actualResult = null;
             
-            if (fixture.result_info) {
-              const result = fixture.result_info;
-              const homeScore = result.home_score || 0;
-              const awayScore = result.away_score || 0;
+            // Try to get result from fixture.result_info first, then from fixture_results table
+            let homeScore = null;
+            let awayScore = null;
+            
+            if (fixture.result_info && fixture.result_info.home_score !== null && fixture.result_info.away_score !== null) {
+              homeScore = fixture.result_info.home_score;
+              awayScore = fixture.result_info.away_score;
+            } else if (fixture.home_score !== null && fixture.away_score !== null) {
+              homeScore = fixture.home_score;
+              awayScore = fixture.away_score;
+            }
+            
+            if (homeScore !== null && awayScore !== null) {
               const totalGoals = homeScore + awayScore;
               
               if (betType === '0' || betType === 0) {
@@ -1423,7 +1522,10 @@ router.get('/slips/:playerAddress', async (req, res) => {
             time: '00:00', // Add time field for frontend compatibility
             odds: parseFloat(odds) / 1000,
             odd: parseFloat(odds) / 1000, // Add odd field for frontend compatibility
-            id: matchId // Add id field for frontend compatibility
+            id: matchId, // Add id field for frontend compatibility
+            isCorrect: null, // Add evaluation result
+            actualResult: null, // Add actual match result
+            matchResult: null // Add full match result
           };
         } catch (error) {
           console.error(`Error enriching prediction for match ${pred[0] || pred.matchId}:`, error);
@@ -1444,7 +1546,10 @@ router.get('/slips/:playerAddress', async (req, res) => {
             time: '00:00', // Add time field for frontend compatibility
             odds: parseFloat(odds) / 1000,
             odd: parseFloat(odds) / 1000, // Add odd field for frontend compatibility
-            id: matchId // Add id field for frontend compatibility
+            id: matchId, // Add id field for frontend compatibility
+            isCorrect: null, // Add evaluation result
+            actualResult: null, // Add actual match result
+            matchResult: null // Add full match result
           };
         }
       }));
@@ -2571,6 +2676,58 @@ router.post('/batch-fixtures', asyncHandler(async (req, res) => {
       success: false,
       error: 'Failed to fetch fixtures',
       message: error.message
+    });
+  }
+}));
+
+// ROOT CAUSE FIX: Test endpoint to directly query database
+router.get('/test-matches/:cycleId', asyncHandler(async (req, res) => {
+  try {
+    const cycleId = parseInt(req.params.cycleId);
+    console.log(`🔍 [TEST] Direct database query for cycle ${cycleId}`);
+    
+    const result = await db.query(`
+      SELECT 
+        fixture_id, home_team, away_team, league_name, match_date,
+        home_odds, draw_odds, away_odds, over_25_odds, under_25_odds, display_order
+      FROM oracle.daily_game_matches
+      WHERE cycle_id = $1
+      ORDER BY display_order ASC
+      LIMIT 10
+    `, [cycleId]);
+    
+    console.log(`🔍 [TEST] Database query result: ${result.rows.length} matches found`);
+    
+    const matches = result.rows.map(row => ({
+      id: parseInt(row.fixture_id),
+      fixture_id: parseInt(row.fixture_id),
+      home_team: row.home_team,
+      away_team: row.away_team,
+      match_date: row.match_date ? new Date(row.match_date).toISOString() : new Date().toISOString(),
+      league_name: row.league_name,
+      home_odds: parseFloat(row.home_odds) || 0,
+      draw_odds: parseFloat(row.draw_odds) || 0,
+      away_odds: parseFloat(row.away_odds) || 0,
+      over_odds: parseFloat(row.over_25_odds) || 0,
+      under_odds: parseFloat(row.under_25_odds) || 0,
+      market_type: "1x2_ou25",
+      display_order: row.display_order || 1,
+      startTime: row.match_date ? Math.floor(new Date(row.match_date).getTime() / 1000) : Math.floor(Date.now() / 1000)
+    }));
+    
+    res.json({
+      success: true,
+      cycleId: cycleId,
+      matchCount: matches.length,
+      matches: matches,
+      rawData: result.rows
+    });
+    
+  } catch (error) {
+    console.error('❌ [TEST] Error in test endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 }));

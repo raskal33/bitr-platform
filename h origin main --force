@@ -1,0 +1,5 @@
+[33m59d1dc5[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Fix guided market creation: Handle both selection and predictedOutcome fields
+[33m777148b[m Fix all method calls in health monitoring cron: Replace sendAlert with triggerAlert
+[33m18635f0[m Fix health monitoring cron: Replace non-existent collectMetrics() with getSystemStatus()
+[33m6d233a7[m Fix production deployment issues:
+[33m49d38cf[m 🔧 Fix automatic cycle resolution logic

@@ -5,28 +5,40 @@ module.exports = {
   database: {
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || 5432,
-    name: process.env.DB_NAME || 'bitredict',
+    name: process.env.DB_NAME || 'bitr-db',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'password',
     maxConnections: 20,
     connectionTimeout: 30000
   },
 
-  // Blockchain configuration
+  // Blockchain configuration - Monad Testnet
   blockchain: {
-    rpcUrl: process.env.RPC_URL || 'https://dream-rpc.somnia.network/',
-    fallbackRpcUrl: process.env.FALLBACK_RPC_URL || 'https://rpc.ankr.com/somnia_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205',
-    chainId: process.env.CHAIN_ID || 50312,
+    rpcUrl: process.env.RPC_URL || 'https://testnet-rpc.monad.xyz/',
+    fallbackRpcUrl: process.env.FALLBACK_RPC_URL || 'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/',
+    chainId: process.env.CHAIN_ID || 10143,
     privateKey: process.env.PRIVATE_KEY,
+    // Monad-specific settings
+    monad: {
+      baseFee: '50000000000', // 50 gwei base fee (hard-coded on testnet)
+      priorityFee: '2000000000', // 2 gwei priority fee
+      maxGasLimit: 30000000, // 30M gas per transaction
+      blockGasLimit: 150000000, // 150M gas per block
+      blockTime: 400, // 400ms block time
+      finality: 800, // 800ms finality
+      throughput: 10000, // 10,000 TPS
+      gasCharging: 'gas_limit', // Charges gas_limit, not gas_used
+      compatibility: 'Cancun', // EVM Cancun fork compatibility
+    },
     contractAddresses: {
-      bitredictPool: process.env.BITREDICT_POOL_ADDRESS || '0xBe9ad7A4CA367d45E61Fc20BbC5C44230e83E9f3',
-      guidedOracle: process.env.GUIDED_ORACLE_ADDRESS || '0x9F91C01bB21385ac9959a1d51e33E65515688DC8',
-      optimisticOracle: process.env.OPTIMISTIC_ORACLE_ADDRESS || '0x114832D788b27c530deCe033c72286927036e7CF',
-      reputationSystem: process.env.REPUTATION_SYSTEM_ADDRESS || '0x94DBC95350AaCcC9DeAbdd9cf60B189a149636C7',
-      bitrToken: process.env.BITR_TOKEN_ADDRESS || '0xe10e734b6d475f4004C354CA5086CA7968efD4fd',
-      stakingContract: process.env.STAKING_CONTRACT_ADDRESS || '0x286A4690904fe9158a316Dfd5eA506d28F497395',
-      bitrFaucet: process.env.BITR_FAUCET_ADDRESS || '0xb0816D384EEC3c41dc75083b2B7C3771A01d0618',
-      oddyssey: process.env.ODDYSSEY_ADDRESS || '0x9f9D719041C8F0EE708440f15AE056Cd858DCF4e'
+      bitredictPool: process.env.BITREDICT_POOL_ADDRESS || '0x080dB155ded47b08D9807ad38Be550784D4Df1e6',
+      guidedOracle: process.env.GUIDED_ORACLE_ADDRESS || '0x9CFB1097577480BD0eDe1795018c89786c541097',
+      optimisticOracle: process.env.OPTIMISTIC_ORACLE_ADDRESS || '0x36fddb1844B89D4c0A00497A1C6B56B958bCcFB6',
+      reputationSystem: process.env.REPUTATION_SYSTEM_ADDRESS || '0x86F7B172caFC2BaB08E6c93BD984fab0b08630e2',
+      bitrToken: process.env.BITR_TOKEN_ADDRESS || '0xbB966Dd2696005c9e893304819237Ea4006A9380',
+      stakingContract: process.env.STAKING_CONTRACT_ADDRESS || '0xD7A8f141320b4C060F8067741C812773166928E4',
+      bitrFaucet: process.env.BITR_FAUCET_ADDRESS || '0x9320ddf7CA7A2826DA3d557BD6A6661Ec7df13c0',
+      oddyssey: process.env.ODDYSSEY_ADDRESS || '0x6E51d91Adb14395B43Ad5b2A1A4f3F6C99332A5A'
     }
   },
 
@@ -133,14 +145,19 @@ module.exports = {
     ]
   },
 
-  // Indexer configuration
+  // Indexer configuration - Monad Testnet Optimized
   indexer: {
     startBlock: process.env.START_BLOCK || '164312555', // Start from recent block instead of 0
-    batchSize: process.env.BATCH_SIZE || 200, // Optimized batch size for better performance
-    pollInterval: process.env.POLL_INTERVAL || 2000, // 2 seconds for polling
-    confirmationBlocks: process.env.CONFIRMATION_BLOCKS || 12, // 12 confirmation blocks for security
-    maxRetries: process.env.MAX_RETRIES || 3,
-    retryDelay: process.env.RETRY_DELAY || 5000 // 5 seconds
+    batchSize: process.env.BATCH_SIZE || 100, // Reduced for Monad's 400ms blocks
+    pollInterval: process.env.POLL_INTERVAL || 500, // 500ms polling (faster than block time)
+    confirmationBlocks: process.env.CONFIRMATION_BLOCKS || 2, // Reduced for Monad's 800ms finality
+    maxRetries: process.env.MAX_RETRIES || 5, // Increased for higher throughput
+    retryDelay: process.env.RETRY_DELAY || 2000, // 2 seconds (reduced for fast recovery)
+    // Monad-specific settings
+    monadOptimized: true,
+    blockTime: 400, // 400ms block time
+    finality: 800, // 800ms finality
+    maxLag: 500 // Maximum acceptable lag in blocks
   },
 
   // External services

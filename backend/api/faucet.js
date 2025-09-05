@@ -4,15 +4,47 @@ const { ethers } = require('ethers');
 const config = require('../config');
 const db = require('../db/db');
 
-// Simplified BITR Faucet ABI (no eligibility checking)
+// Enhanced BITR Faucet ABI with Oddyssey integration
 const FAUCET_ABI = [
   "function claimBitr() external",
   "function getUserInfo(address user) external view returns (bool claimed, uint256 claimTime)",
+  "function checkEligibility(address user) external view returns (bool eligible, string reason, uint256 oddysseySlips)",
   "function getFaucetStats() external view returns (uint256 balance, uint256 totalDistributed, uint256 userCount, bool active)",
   "function hasSufficientBalance() external view returns (bool)",
   "function maxPossibleClaims() external view returns (uint256)",
   "event FaucetClaimed(address indexed user, uint256 amount, uint256 timestamp)"
 ];
+
+// User session tracking for authentication and terms acceptance
+const userSessions = new Map(); // In production, use Redis or database
+
+/**
+ * Validate user authentication and terms acceptance
+ */
+function validateUserSession(address, sessionData) {
+  if (!sessionData) {
+    return { valid: false, reason: "No active session" };
+  }
+
+  // Check if session is expired (24 hours)
+  const sessionAge = Date.now() - sessionData.createdAt;
+  if (sessionAge > 24 * 60 * 60 * 1000) {
+    userSessions.delete(address.toLowerCase());
+    return { valid: false, reason: "Session expired" };
+  }
+
+  // Check if user accepted terms
+  if (!sessionData.termsAccepted) {
+    return { valid: false, reason: "Terms not accepted" };
+  }
+
+  // Check if wallet is authenticated
+  if (!sessionData.walletAuthenticated) {
+    return { valid: false, reason: "Wallet not authenticated" };
+  }
+
+  return { valid: true };
+}
 
 /**
  * Check STT activity eligibility using database
@@ -88,8 +120,114 @@ async function checkSTTActivity(address) {
 }
 
 /**
+ * POST /faucet/authenticate
+ * Authenticate user wallet connection
+ */
+router.post('/authenticate', async (req, res) => {
+  try {
+    const { address, signature, message } = req.body;
+    
+    // Validate address format
+    if (!ethers.isAddress(address)) {
+      return res.status(400).json({
+        error: 'Invalid wallet address format'
+      });
+    }
+
+    // Verify signature
+    if (!signature || !message) {
+      return res.status(400).json({
+        error: 'Signature and message are required'
+      });
+    }
+
+    try {
+      const recoveredAddress = ethers.verifyMessage(message, signature);
+      if (recoveredAddress.toLowerCase() !== address.toLowerCase()) {
+        return res.status(400).json({
+          error: 'Invalid signature'
+        });
+      }
+    } catch (error) {
+      return res.status(400).json({
+        error: 'Failed to verify signature'
+      });
+    }
+
+    // Create or update user session
+    const sessionData = userSessions.get(address.toLowerCase()) || {};
+    sessionData.walletAuthenticated = true;
+    sessionData.createdAt = sessionData.createdAt || Date.now();
+    sessionData.lastAuthenticated = Date.now();
+    userSessions.set(address.toLowerCase(), sessionData);
+
+    res.json({
+      success: true,
+      message: 'Wallet authenticated successfully',
+      address: address,
+      sessionValid: true
+    });
+
+  } catch (error) {
+    console.error('Error authenticating wallet:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to authenticate wallet'
+    });
+  }
+});
+
+/**
+ * POST /faucet/accept-terms
+ * Record user's acceptance of terms and conditions
+ */
+router.post('/accept-terms', async (req, res) => {
+  try {
+    const { address, termsVersion } = req.body;
+    
+    // Validate address format
+    if (!ethers.isAddress(address)) {
+      return res.status(400).json({
+        error: 'Invalid wallet address format'
+      });
+    }
+
+    // Get existing session
+    const sessionData = userSessions.get(address.toLowerCase()) || {};
+    
+    // Check if wallet is authenticated
+    if (!sessionData.walletAuthenticated) {
+      return res.status(400).json({
+        error: 'Wallet must be authenticated first'
+      });
+    }
+
+    // Record terms acceptance
+    sessionData.termsAccepted = true;
+    sessionData.termsVersion = termsVersion || '1.0';
+    sessionData.termsAcceptedAt = Date.now();
+    sessionData.createdAt = sessionData.createdAt || Date.now();
+    userSessions.set(address.toLowerCase(), sessionData);
+
+    res.json({
+      success: true,
+      message: 'Terms accepted successfully',
+      address: address,
+      termsVersion: sessionData.termsVersion
+    });
+
+  } catch (error) {
+    console.error('Error accepting terms:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to record terms acceptance'
+    });
+  }
+});
+
+/**
  * GET /faucet/eligibility/:address
- * Check if user is eligible to claim BITR from faucet
+ * Check if user is eligible to claim BITR from faucet (Enhanced with Oddyssey validation)
  */
 router.get('/eligibility/:address', async (req, res) => {
   try {
@@ -109,27 +247,26 @@ router.get('/eligibility/:address', async (req, res) => {
       provider
     );
     
-    // Check claim status from contract
-    const [claimed, claimTime] = await faucetContract.getUserInfo(address);
-    const hasSufficientBalance = await faucetContract.hasSufficientBalance();
+    // Check on-chain eligibility (includes Oddyssey slips requirement)
+    const [onChainEligible, onChainReason, oddysseySlips] = await faucetContract.checkEligibility(address);
     
-    // Check STT activity from database
+    // Check backend validations
+    const sessionData = userSessions.get(address.toLowerCase());
+    const sessionValidation = validateUserSession(address, sessionData);
+    
+    // Check STT activity from database (legacy requirement)
     const activityData = await checkSTTActivity(address);
     
-    // Determine eligibility
-    const alreadyClaimed = claimed;
-    const hasRequiredActivity = activityData.hasActivity;
-    const faucetHasBalance = hasSufficientBalance;
-    
-    const eligible = !alreadyClaimed && hasRequiredActivity && faucetHasBalance;
+    // Determine overall eligibility
+    const eligible = onChainEligible && sessionValidation.valid && activityData.hasActivity;
     
     let reason = "Eligible to claim";
-    if (alreadyClaimed) {
-      reason = "Already claimed";
-    } else if (!hasRequiredActivity) {
-      reason = "Must create a pool or place a bet using STT first";
-    } else if (!faucetHasBalance) {
-      reason = "Insufficient faucet balance";
+    if (!onChainEligible) {
+      reason = onChainReason;
+    } else if (!sessionValidation.valid) {
+      reason = sessionValidation.reason;
+    } else if (!activityData.hasActivity) {
+      reason = "Must create a pool or place a bet using MON first";
     }
     
     res.json({
@@ -137,23 +274,35 @@ router.get('/eligibility/:address', async (req, res) => {
       eligible,
       reason,
       status: {
-        hasClaimed: alreadyClaimed,
-        claimTime: claimTime.toString(),
-        hasSTTActivity: hasRequiredActivity,
-        faucetHasBalance
+        onChainEligible,
+        onChainReason,
+        sessionValid: sessionValidation.valid,
+        sessionReason: sessionValidation.reason,
+        hasMonActivity: activityData.hasActivity
+      },
+      oddyssey: {
+        totalSlips: parseInt(oddysseySlips.toString()),
+        required: 2,
+        meetsRequirement: parseInt(oddysseySlips.toString()) >= 2
       },
       activity: {
         poolsCreated: activityData.poolsCreated,
         betsPlaced: activityData.betsPlaced,
         firstActivity: activityData.firstActivity,
         lastActivity: activityData.lastActivity,
-        totalSTTActions: activityData.totalSTTActions
+        totalMonActions: activityData.totalSTTActions
       },
+      session: sessionData ? {
+        authenticated: sessionData.walletAuthenticated || false,
+        termsAccepted: sessionData.termsAccepted || false,
+        createdAt: sessionData.createdAt,
+        termsVersion: sessionData.termsVersion
+      } : null,
       requirements: {
-        sttActivityRequired: true,
-        message: hasRequiredActivity ? 
-          "✅ STT activity verified" : 
-          "❌ Must create a pool or place a bet using STT first"
+        oddysseySlips: "Must have at least 2 Oddyssey slips",
+        authentication: "Must authenticate wallet connection",
+        termsAcceptance: "Must accept terms and conditions",
+        monActivity: "Must create a pool or place a bet using MON"
       }
     });
     
@@ -199,32 +348,36 @@ router.post('/claim', async (req, res) => {
       provider
     );
     
-    // Check claim status from contract
-    const [claimed, claimTime] = await faucetContract.getUserInfo(address);
-    const hasSufficientBalance = await faucetContract.hasSufficientBalance();
+    // Check on-chain eligibility (includes all contract validations)
+    const [onChainEligible, onChainReason, oddysseySlips] = await faucetContract.checkEligibility(address);
     
-    // Check STT activity from database
+    // Check backend validations
+    const sessionData = userSessions.get(address.toLowerCase());
+    const sessionValidation = validateUserSession(address, sessionData);
+    
+    // Check MON activity from database
     const activityData = await checkSTTActivity(address);
     
-    // Validate eligibility
-    if (claimed) {
+    // Validate all requirements
+    if (!onChainEligible) {
       return res.status(400).json({
-        error: 'Already claimed',
-        claimTime: claimTime.toString()
+        error: 'Not eligible to claim',
+        reason: onChainReason,
+        oddysseySlips: parseInt(oddysseySlips.toString())
+      });
+    }
+    
+    if (!sessionValidation.valid) {
+      return res.status(400).json({
+        error: 'Authentication required',
+        reason: sessionValidation.reason
       });
     }
     
     if (!activityData.hasActivity) {
       return res.status(400).json({
         error: 'Not eligible to claim',
-        reason: 'Must create a pool or place a bet using STT first'
-      });
-    }
-    
-    if (!hasSufficientBalance) {
-      return res.status(400).json({
-        error: 'Insufficient faucet balance',
-        reason: 'Faucet needs to be refilled'
+        reason: 'Must create a pool or place a bet using MON first'
       });
     }
     
@@ -236,6 +389,12 @@ router.post('/claim', async (req, res) => {
       method: 'claimBitr',
       amount: '20000000000000000000000', // 20,000 BITR in wei
       instructions: 'Call claimBitr() function on the faucet contract',
+      validation: {
+        oddysseySlips: parseInt(oddysseySlips.toString()),
+        authenticated: sessionData.walletAuthenticated,
+        termsAccepted: sessionData.termsAccepted,
+        monActivity: activityData.hasActivity
+      },
       activity: activityData
     });
     

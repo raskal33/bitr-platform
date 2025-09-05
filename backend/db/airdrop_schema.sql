@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS airdrop.eligibility (
     oddyssey_slip_count INTEGER DEFAULT 0,
     has_suspicious_transfers BOOLEAN DEFAULT FALSE,
     is_transfer_only_recipient BOOLEAN DEFAULT FALSE,
+    consolidation_detected BOOLEAN DEFAULT FALSE,
     is_eligible BOOLEAN DEFAULT FALSE,
     snapshot_bitr_balance NUMERIC(78, 18),
     airdrop_amount NUMERIC(78, 18),

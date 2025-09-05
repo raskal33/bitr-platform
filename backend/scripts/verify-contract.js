@@ -14,7 +14,7 @@ async function verifyContract() {
   
   try {
     // Initialize provider and wallet
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://dream-rpc.somnia.network/');
+    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://testnet-rpc.monad.xyz/');
     const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
     
     console.log(`Wallet: ${wallet.address}`);

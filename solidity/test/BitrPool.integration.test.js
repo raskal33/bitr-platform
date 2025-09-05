@@ -2,13 +2,13 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("BitredictPool - Integration & Edge Cases", function () {
-    let bitredictPool, sttToken, bitrToken, owner, creator, bettor1, bettor2, lp1, lp2, feeCollector, guidedOracle, optimisticOracle;
+    let bitredictPool, monToken, bitrToken, owner, creator, bettor1, bettor2, lp1, lp2, feeCollector, guidedOracle, optimisticOracle;
 
     beforeEach(async function () {
         [owner, creator, bettor1, bettor2, lp1, lp2, feeCollector] = await ethers.getSigners();
 
         const MockERC20 = await ethers.getContractFactory("MockERC20");
-        sttToken = await MockERC20.deploy("STT Token", "STT", 18, ethers.parseEther("10000000"));
+        monToken = await MockERC20.deploy("MON Token", "MON", 18, ethers.parseEther("10000000"));
         bitrToken = await MockERC20.deploy("Bitredict Token", "BITR", 18, ethers.parseEther("10000000"));
 
         const MockGuidedOracle = await ethers.getContractFactory("MockGuidedOracle");
@@ -18,18 +18,18 @@ describe("BitredictPool - Integration & Edge Cases", function () {
 
         const BitredictPool = await ethers.getContractFactory("BitredictPool");
         bitredictPool = await BitredictPool.deploy(
-            await sttToken.getAddress(),
+            await monToken.getAddress(),
             await bitrToken.getAddress(),
             feeCollector.address,
             await guidedOracle.getAddress(),
             await optimisticOracle.getAddress()
         );
 
-        await sttToken.transfer(creator.address, ethers.parseEther("100000"));
-        await sttToken.transfer(bettor1.address, ethers.parseEther("10000"));
-        await sttToken.transfer(bettor2.address, ethers.parseEther("10000"));
-        await sttToken.transfer(lp1.address, ethers.parseEther("10000"));
-        await sttToken.transfer(lp2.address, ethers.parseEther("10000"));
+        await monToken.transfer(creator.address, ethers.parseEther("100000"));
+        await monToken.transfer(bettor1.address, ethers.parseEther("10000"));
+        await monToken.transfer(bettor2.address, ethers.parseEther("10000"));
+        await monToken.transfer(lp1.address, ethers.parseEther("10000"));
+        await monToken.transfer(lp2.address, ethers.parseEther("10000"));
         await bitrToken.transfer(bettor1.address, ethers.parseEther("10000"));
     });
 
@@ -52,7 +52,7 @@ describe("BitredictPool - Integration & Edge Cases", function () {
         };
         const finalParams = { ...defaultParams, ...params };
 
-        const token = finalParams.useBitr ? bitrToken : sttToken;
+        const token = finalParams.useBitr ? bitrToken : monToken;
         await token.connect(creator).approve(await bitredictPool.getAddress(), finalParams.creatorStake);
 
         const tx = await bitredictPool.connect(creator).createPool(
@@ -85,7 +85,7 @@ describe("BitredictPool - Integration & Edge Cases", function () {
         const accounts = [bettor1, bettor2, lp1, lp2];
         
         for (const account of accounts) {
-            await sttToken.connect(account).approve(await bitredictPool.getAddress(), betAmount);
+            await monToken.connect(account).approve(await bitredictPool.getAddress(), betAmount);
             await bitredictPool.connect(account).placeBet(poolId, betAmount);
         }
 
@@ -103,7 +103,7 @@ describe("BitredictPool - Integration & Edge Cases", function () {
             expect(await bitredictPool.poolWhitelist(poolId, user)).to.be.true;
         }
 
-        await sttToken.connect(bettor1).approve(await bitredictPool.getAddress(), ethers.parseEther("10"));
+        await monToken.connect(bettor1).approve(await bitredictPool.getAddress(), ethers.parseEther("10"));
         await expect(bitredictPool.connect(bettor1).placeBet(poolId, ethers.parseEther("10"))).to.not.be.reverted;
 
         await bitredictPool.connect(creator).removeFromWhitelist(poolId, [bettor2.address]);

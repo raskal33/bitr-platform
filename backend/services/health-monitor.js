@@ -235,7 +235,7 @@ class HealthMonitor {
     const blockchainHealth = {
       status: 'unknown',
       responseTime: null,
-      network: 'somnia',
+      network: 'monad',
       rpcUrl: config.blockchain.rpcUrl,
       lastError: null
     };

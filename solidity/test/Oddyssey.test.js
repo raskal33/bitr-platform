@@ -10,7 +10,7 @@ describe("Oddyssey", function () {
     // --- Constants ---
     const MATCH_COUNT = 10;
     const ODDS_SCALING_FACTOR = 1000;
-    const ENTRY_FEE = ethers.parseEther("0.5"); // Updated to 0.5 STT
+    const ENTRY_FEE = ethers.parseEther("0.5"); // Updated to 0.5 MON
 
     // --- Enums ---
     const BetType = { MONEYLINE: 0, OVER_UNDER: 1 };
@@ -25,7 +25,7 @@ describe("Oddyssey", function () {
     async function deployOddysseyFixture() {
         const [owner, oracle, devWallet, player1, player2, player3] = await ethers.getSigners();
 
-        // Deploy Oddyssey Contract (STT is native, no token needed)
+        // Deploy Oddyssey Contract (MON is native, no token needed)
         const Oddyssey = await ethers.getContractFactory("Oddyssey");
         const oddyssey = await Oddyssey.deploy(await devWallet.getAddress(), ENTRY_FEE);
 

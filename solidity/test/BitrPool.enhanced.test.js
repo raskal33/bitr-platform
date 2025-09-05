@@ -1,14 +1,14 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("BitredictPool Enhanced Features", function () {
-    let bitredictPool, bitrToken, guidedOracle;
+describe("BitrPool Enhanced Features", function () {
+    let bitrPool, bitrToken, guidedOracle;
     let owner, creator, bettor1, bettor2, lp1;
 
     beforeEach(async function () {
         [owner, creator, bettor1, bettor2, lp1] = await ethers.getSigners();
 
-        // Deploy mock BITR token (STT is now native)
+        // Deploy mock BITR token (MON is now native)
         const MockERC20 = await ethers.getContractFactory("MockERC20");
         bitrToken = await MockERC20.deploy("Bitredict Token", "BITR");
         
@@ -20,8 +20,8 @@ describe("BitredictPool Enhanced Features", function () {
         guidedOracle = await MockGuidedOracle.deploy();
         
         // Deploy main contract with correct constructor arguments
-        const BitredictPool = await ethers.getContractFactory("BitredictPool");
-        bitredictPool = await BitredictPool.deploy(
+        const BitrPool = await ethers.getContractFactory("BitrPool");
+        bitrPool = await BitrPool.deploy(
             await bitrToken.getAddress(),
             owner.address, // fee collector
             await guidedOracle.getAddress(),
@@ -44,8 +44,8 @@ describe("BitredictPool Enhanced Features", function () {
             const eventStart = currentTime + 3600;
             const eventEnd = currentTime + 7200;
 
-            // Create pool with native STT (no approval needed)
-            await bitredictPool.connect(creator).createPool(
+            // Create pool with native MON (no approval needed)
+            await bitrPool.connect(creator).createPool(
                 ethers.keccak256(ethers.toUtf8Bytes("HOME_WIN")),
                 150, // 1.50x odds
                 ethers.parseEther("100"),
@@ -55,18 +55,18 @@ describe("BitredictPool Enhanced Features", function () {
                 "football",
                 "UK",
                 false, // not private
-                ethers.parseEther("10"), // max 10 STT per user
-                false, // use STT (native)
+                ethers.parseEther("10"), // max 10 MON per user
+                false, // use MON (native)
                 0, // guided oracle
                 ethers.keccak256(ethers.toUtf8Bytes("MATCH_123")),
-                { value: ethers.parseEther("101") } // 1 STT creation fee + 100 STT stake
+                { value: ethers.parseEther("101") } // 1 MON creation fee + 100 MON stake
             );
             poolId = 0;
         });
 
         it("Should return correct pool progress metrics", async function () {
             const [totalPoolSize, currentBettorStake, maxBettorCapacity, creatorSideStake, fillPercentage, bettorCount, lpCount] = 
-                await bitredictPool.getPoolProgress(poolId);
+                await bitrPool.getPoolProgress(poolId);
 
             expect(totalPoolSize).to.equal(ethers.parseEther("300")); // 100 + 200 = 300
             expect(currentBettorStake).to.equal(0); // No bets yet
@@ -78,9 +78,9 @@ describe("BitredictPool Enhanced Features", function () {
         });
 
         it("Should enforce maxBetPerUser limit", async function () {
-            // Try to bet more than the 10 STT limit
+            // Try to bet more than the 10 MON limit
             await expect(
-                bitredictPool.connect(bettor1).placeBet(poolId, ethers.parseEther("15"), { value: ethers.parseEther("15") })
+                bitrPool.connect(bettor1).placeBet(poolId, ethers.parseEther("15"), { value: ethers.parseEther("15") })
             ).to.be.revertedWith("Exceeds max bet per user");
         });
     });

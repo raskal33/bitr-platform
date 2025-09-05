@@ -19,11 +19,11 @@ COPY solidity/artifacts/ ./solidity/artifacts/
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs
-RUN adduser -S bitredict -u 1001
+RUN adduser -S bitr -u 1001
 
 # Change ownership of the app directory
-RUN chown -R bitredict:nodejs /app
-USER bitredict
+RUN chown -R bitr:nodejs /app
+USER bitr
 
 # Expose port
 EXPOSE 3000

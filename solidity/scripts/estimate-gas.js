@@ -8,7 +8,7 @@ async function main() {
   const deployerAddress = await deployer.getAddress();
   
   console.log("📝 Deploying contracts with account:", deployerAddress);
-  console.log("💰 Account balance:", ethers.formatEther(await ethers.provider.getBalance(deployerAddress)), "STT");
+  console.log("💰 Account balance:", ethers.formatEther(await ethers.provider.getBalance(deployerAddress)), "MON");
 
   // Contract parameters
   const BITR_TOKEN_ADDRESS = "0x4b10fBFFDEE97C42E29899F47A2ECD30a38dBf2C";
@@ -43,25 +43,25 @@ async function main() {
   // Calculate cost with current gas price
   const gasPrice = await ethers.provider.getFeeData();
   const gasCost = gasEstimate * gasPrice.gasPrice;
-  const gasCostInSTT = ethers.formatEther(gasCost);
+  const gasCostInMON = ethers.formatEther(gasCost);
   
   console.log("  - Gas price:", ethers.formatUnits(gasPrice.gasPrice, "gwei"), "gwei");
-  console.log("  - Estimated cost:", gasCostInSTT, "STT");
+  console.log("  - Estimated cost:", gasCostInMON, "MON");
   
   // Check if we have enough balance
   const balance = await ethers.provider.getBalance(deployerAddress);
-  const balanceInSTT = ethers.formatEther(balance);
+  const balanceInMON = ethers.formatEther(balance);
   
   console.log("\n💰 Balance check:");
-  console.log("  - Current balance:", balanceInSTT, "STT");
-  console.log("  - Required cost:", gasCostInSTT, "STT");
+  console.log("  - Current balance:", balanceInMON, "MON");
+  console.log("  - Required cost:", gasCostInMON, "MON");
   
   if (balance > gasCost) {
     console.log("✅ Sufficient balance for deployment");
   } else {
     console.log("❌ Insufficient balance for deployment");
     const shortfall = gasCost - balance;
-    console.log("  - Shortfall:", ethers.formatEther(shortfall), "STT");
+    console.log("  - Shortfall:", ethers.formatEther(shortfall), "MON");
   }
 }
 

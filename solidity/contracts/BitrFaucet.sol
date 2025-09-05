@@ -7,14 +7,21 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title BitrFaucet
- * @notice Distributes 20,000 testnet BITR tokens to eligible users
+ * @notice Distributes 20,000 testnet BITR tokens to eligible users on Monad Testnet
  * @dev Eligibility is verified by backend API, not on-chain
+ * Optimized for Monad's 400ms blocks and 10,000 TPS throughput
  */
+interface IOddyssey {
+    function getUserTotalSlips(address user) external view returns (uint256);
+}
+
 contract BitrFaucet is Ownable, ReentrancyGuard {
     IERC20 public immutable bitrToken;
+    IOddyssey public immutable oddysseyContract;
     
     // Faucet configuration
     uint256 public constant FAUCET_AMOUNT = 20000 * 1e18; // 20,000 BITR
+    uint256 public constant MIN_ODDYSSEY_SLIPS = 2; // Minimum 2 Oddyssey slips required
     
     // Tracking
     mapping(address => bool) public hasClaimed;
@@ -33,19 +40,26 @@ contract BitrFaucet is Ownable, ReentrancyGuard {
     /**
      * @notice Constructor
      * @param _bitrToken Address of the BITR token contract
+     * @param _oddysseyContract Address of the Oddyssey contract
      */
-    constructor(address _bitrToken) Ownable(msg.sender) {
+    constructor(address _bitrToken, address _oddysseyContract) Ownable(msg.sender) {
         require(_bitrToken != address(0), "Invalid BITR token address");
+        require(_oddysseyContract != address(0), "Invalid Oddyssey contract address");
         bitrToken = IERC20(_bitrToken);
+        oddysseyContract = IOddyssey(_oddysseyContract);
     }
     
     /**
      * @notice Claim testnet BITR tokens
-     * @dev Eligibility must be verified by backend before calling this
+     * @dev Requires 2+ Oddyssey slips and backend verification
      */
     function claimBitr() external nonReentrant {
         require(faucetActive, "Faucet is not active");
         require(!hasClaimed[msg.sender], "Already claimed");
+        
+        // Check Oddyssey slips requirement (on-chain validation)
+        uint256 userSlips = oddysseyContract.getUserTotalSlips(msg.sender);
+        require(userSlips >= MIN_ODDYSSEY_SLIPS, "Must have at least 2 Oddyssey slips");
         
         // Check faucet has enough tokens
         uint256 faucetBalance = bitrToken.balanceOf(address(this));
@@ -75,6 +89,43 @@ contract BitrFaucet is Ownable, ReentrancyGuard {
     ) {
         claimed = hasClaimed[user];
         claimTime = lastClaimTime[user];
+    }
+
+    /**
+     * @notice Check if user is eligible to claim (on-chain validation)
+     * @param user Address to check
+     * @return eligible Whether user meets on-chain requirements
+     * @return reason Reason for eligibility/ineligibility
+     * @return oddysseySlips Number of Oddyssey slips user has
+     */
+    function checkEligibility(address user) external view returns (
+        bool eligible,
+        string memory reason,
+        uint256 oddysseySlips
+    ) {
+        // Check if already claimed
+        if (hasClaimed[user]) {
+            return (false, "Already claimed", 0);
+        }
+
+        // Check if faucet is active
+        if (!faucetActive) {
+            return (false, "Faucet is not active", 0);
+        }
+
+        // Check faucet balance
+        uint256 faucetBalance = bitrToken.balanceOf(address(this));
+        if (faucetBalance < FAUCET_AMOUNT) {
+            return (false, "Insufficient faucet balance", 0);
+        }
+
+        // Check Oddyssey slips requirement
+        oddysseySlips = oddysseyContract.getUserTotalSlips(user);
+        if (oddysseySlips < MIN_ODDYSSEY_SLIPS) {
+            return (false, "Must have at least 2 Oddyssey slips", oddysseySlips);
+        }
+
+        return (true, "Eligible to claim", oddysseySlips);
     }
     
     /**

@@ -20,7 +20,7 @@ contract OptimisticOracle is Ownable {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 
-    IERC20 public immutable bondToken; // BITR token for bonds (STT is native coin)
+    IERC20 public immutable bondToken; // BITR token for bonds (MON is native coin)
     IBitredictPool public immutable bitredictPool;
     
     // Oracle configuration

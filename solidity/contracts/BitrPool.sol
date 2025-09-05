@@ -19,6 +19,17 @@ enum OracleType {
     OPEN
 }
 
+enum MarketType {
+    MONEYLINE,      // 1X2
+    OVER_UNDER,     // Over/Under goals
+    BOTH_TEAMS_SCORE, // BTTS
+    HALF_TIME,      // HT result
+    DOUBLE_CHANCE,  // 1X, X2, 12
+    CORRECT_SCORE,  // Exact score
+    FIRST_GOAL,     // First goal scorer
+    CUSTOM          // Arbitrary YES/NO
+}
+
 enum BoostTier {
     NONE,
     BRONZE,
@@ -37,8 +48,8 @@ enum ReputationAction {
     CHALLENGE_FAILED
 }
 
-interface IBitredictStaking {
-    function addRevenue(uint256 bitrAmount, uint256 sttAmount) external;
+interface IBitrStaking {
+    function addRevenue(uint256 bitrAmount, uint256 monAmount) external;
 }
 
 interface IReputationSystem {
@@ -47,15 +58,14 @@ interface IReputationSystem {
     function canCreateOpenPool(address user) external view returns (bool);
 }
 
-contract BitredictPool is Ownable {
+contract BitrPool is Ownable {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 
     IERC20 public bitrToken;
     uint256 public poolCount;
     uint256 public comboPoolCount;
-    // Creation fees: 1 STT for STT pools, 50 BITR for BITR pools
-    uint256 public constant creationFeeSTT = 1e18;     // 1 STT
+    uint256 public constant creationFeeMON = 1e18;     // 1 MON
     uint256 public constant creationFeeBITR = 50e18;   // 50 BITR
     uint256 public constant platformFee = 500;
     address public immutable feeCollector;
@@ -63,13 +73,12 @@ contract BitredictPool is Ownable {
     address public immutable optimisticOracle;
     IReputationSystem public reputationSystem;
     
-    uint256 public totalCollectedSTT;
+    uint256 public totalCollectedMON;
     uint256 public totalCollectedBITR;
     
     uint256 public constant bettingGracePeriod = 60;
     uint256 public constant arbitrationTimeout = 24 hours;
-    // Minimum stakes: 5 STT for STT pools, 1000 BITR for BITR pools
-    uint256 public constant minPoolStakeSTT = 5e18;    // 5 STT
+    uint256 public constant minPoolStakeMON = 5e18;    // 5 MON
     uint256 public constant minPoolStakeBITR = 1000e18; // 1000 BITR
     uint256 public constant minBetAmount = 1e18;
     uint256 public constant HIGH_ODDS_THRESHOLD = 500;
@@ -146,52 +155,54 @@ contract BitredictPool is Ownable {
     }
 
     struct Pool {
-        // --- Packed for gas efficiency ---
-        address creator;            // 20 bytes
-        uint16 odds;                // 2 bytes (e.g., 150 = 1.50x)
-        bool settled;               // 1 byte
-        bool creatorSideWon;        // 1 byte
-        bool isPrivate;             // 1 byte
-        bool usesBitr;              // 1 byte
-        bool filledAbove60;         // 1 byte
-        OracleType oracleType;      // 1 byte (0 = GUIDED, 1 = OPEN)
-        // Total packed: 28 bytes, 2 slots
+        address creator;
+        uint16 odds;
+        bool settled;
+        bool creatorSideWon;
+        bool isPrivate;
+        bool usesBitr;
+        bool filledAbove60;
+        OracleType oracleType;
 
         uint256 creatorStake;
-        uint256 totalCreatorSideStake; // Total liquidity on creator's side (including creator + LPs)
-        uint256 maxBettorStake; // Calculated based on total creator side stake
-        uint256 totalBettorStake; // Total stake from people betting ON the predicted outcome
-        bytes32 predictedOutcome; // What the creator thinks WON'T happen
+        uint256 totalCreatorSideStake;
+        uint256 maxBettorStake;
+        uint256 totalBettorStake;
+        bytes32 predictedOutcome;
         bytes32 result;
-        bytes32 marketId;           // External market reference (Sportmonks ID, coin symbol, etc.)
+        bytes32 marketId;
         
         uint256 eventStartTime;
         uint256 eventEndTime;
-        uint256 bettingEndTime; // eventStartTime - grace period
+        uint256 bettingEndTime;
         uint256 resultTimestamp;
-        uint256 arbitrationDeadline; // eventEndTime + arbitration timeout
+        uint256 arbitrationDeadline;
         
         string league;
-        string category; // "football", "basketball", etc.
-        string region;
+        string category;
+        MarketType marketType;
         
         uint256 maxBetPerUser;
     }
 
     mapping(uint256 => Pool) public pools;
-    mapping(uint256 => address[]) public poolBettors; // People betting ON the predicted outcome
-    mapping(uint256 => mapping(address => uint256)) public bettorStakes; // Stakes of people betting ON
-    mapping(uint256 => address[]) public poolLPs; // People betting AGAINST (with creator)
-    mapping(uint256 => mapping(address => uint256)) public lpStakes; // LP stakes
+    mapping(uint256 => address[]) public poolBettors;
+    mapping(uint256 => mapping(address => uint256)) public bettorStakes;
+    mapping(uint256 => address[]) public poolLPs;
+    mapping(uint256 => mapping(address => uint256)) public lpStakes;
     mapping(uint256 => mapping(address => bool)) public claimed;
 
-    event PoolCreated(uint256 indexed poolId, address indexed creator, uint256 eventStartTime, uint256 eventEndTime, OracleType oracleType, bytes32 marketId);
+    event PoolCreated(uint256 indexed poolId, address indexed creator, uint256 eventStartTime, uint256 eventEndTime, OracleType oracleType, bytes32 marketId, MarketType marketType, string league, string category);
     event BetPlaced(uint256 indexed poolId, address indexed bettor, uint256 amount, bool isForOutcome);
     event LiquidityAdded(uint256 indexed poolId, address indexed provider, uint256 amount);
     event PoolSettled(uint256 indexed poolId, bytes32 result, bool creatorSideWon, uint256 timestamp);
     event RewardClaimed(uint256 indexed poolId, address indexed user, uint256 amount);
     event PoolRefunded(uint256 indexed poolId, string reason);
     event UserWhitelisted(uint256 indexed poolId, address indexed user);
+    event PoolFilledAboveThreshold(uint256 indexed poolId, uint256 fillPercentage, uint256 timestamp);
+    event UserBetPlaced(uint256 indexed poolId, address indexed user, uint256 amount, uint256 totalUserBets);
+    event UserLiquidityAdded(uint256 indexed poolId, address indexed user, uint256 amount, uint256 totalUserLiquidity);
+    event PoolVolumeUpdated(uint256 indexed poolId, uint256 totalVolume, uint256 participantCount);
     event ReputationActionOccurred(
         address indexed user,
         ReputationAction action,
@@ -234,7 +245,7 @@ contract BitredictPool is Ownable {
         uint256 _eventEndTime,
         string memory _league,
         string memory _category,
-        string memory _region,
+        MarketType _marketType,
         bool _isPrivate,
         uint256 _maxBetPerUser,
         bool _useBitr,
@@ -252,11 +263,10 @@ contract BitredictPool is Ownable {
             }
         }
         
-        // Check minimum stake based on token type
         if (_useBitr) {
             require(_creatorStake >= minPoolStakeBITR, "BITR stake below minimum (1000 BITR)");
         } else {
-            require(_creatorStake >= minPoolStakeSTT, "STT stake below minimum (5 STT)");
+            require(_creatorStake >= minPoolStakeMON, "MON stake below minimum (5 MON)");
         }
         require(_creatorStake <= 1000000 * 1e18, "Stake too large"); // Max 1M tokens
         require(_eventStartTime > block.timestamp, "Event must be in future");
@@ -264,18 +274,15 @@ contract BitredictPool is Ownable {
         require(_eventStartTime > block.timestamp + bettingGracePeriod, "Event too soon");
         require(_eventStartTime < block.timestamp + 365 days, "Event too far");
 
-        // Calculate total required based on token type
-        uint256 creationFee = _useBitr ? creationFeeBITR : creationFeeSTT;
+        uint256 creationFee = _useBitr ? creationFeeBITR : creationFeeMON;
         uint256 totalRequired = creationFee + _creatorStake;
         
         if (_useBitr) {
-            // Use BITR token
             require(bitrToken.transferFrom(msg.sender, address(this), totalRequired), "BITR transfer failed");
             totalCollectedBITR += creationFee;
         } else {
-            // Use native STT
-            require(msg.value == totalRequired, "Incorrect STT amount");
-            totalCollectedSTT += creationFee;
+            require(msg.value == totalRequired, "Incorrect MON amount");
+            totalCollectedMON += creationFee;
         }
 
         // Calculate max bettor stake with proper handling for odds below 2.00x
@@ -305,7 +312,7 @@ contract BitredictPool is Ownable {
             arbitrationDeadline: arbitrationEnd,
             league: _league,
             category: _category,
-            region: _region,
+            marketType: _marketType,
             isPrivate: _isPrivate,
             maxBetPerUser: _maxBetPerUser,
             usesBitr: _useBitr,
@@ -317,14 +324,13 @@ contract BitredictPool is Ownable {
         poolLPs[poolCount].push(msg.sender);
         lpStakes[poolCount][msg.sender] = _creatorStake;
 
-        // --- Indexing for efficient lookups ---
         bytes32 categoryHash = keccak256(bytes(_category));
         categoryPools[categoryHash].push(poolCount);
         creatorActivePools[msg.sender].push(poolCount);
         poolIdToCreatorIndex[poolCount] = creatorActivePools[msg.sender].length - 1;
 
         emit ReputationActionOccurred(msg.sender, ReputationAction.POOL_CREATED, _creatorStake, bytes32(poolCount), block.timestamp);
-        emit PoolCreated(poolCount, msg.sender, _eventStartTime, _eventEndTime, _oracleType, _marketId);
+        emit PoolCreated(poolCount, msg.sender, _eventStartTime, _eventEndTime, _oracleType, _marketId, _marketType, _league, _category);
         
         poolCount++;
     }
@@ -374,8 +380,13 @@ contract BitredictPool is Ownable {
         poolPtr.totalBettorStake = pool.totalBettorStake + amount;
         poolPtr.maxBettorStake = currentMaxBettorStake;
 
-        if (!poolPtr.filledAbove60 && (poolPtr.totalBettorStake * 100) / currentMaxBettorStake >= 60) {
+        uint256 fillPercentage = (poolPtr.totalBettorStake * 100) / currentMaxBettorStake;
+        emit UserBetPlaced(poolId, msg.sender, amount, bettorStakes[poolId][msg.sender]);
+        emit PoolVolumeUpdated(poolId, poolPtr.totalBettorStake + pool.totalCreatorSideStake, poolBettors[poolId].length + poolLPs[poolId].length);
+
+        if (!poolPtr.filledAbove60 && fillPercentage >= 60) {
             poolPtr.filledAbove60 = true;
+            emit PoolFilledAboveThreshold(poolId, fillPercentage, block.timestamp);
             emit ReputationActionOccurred(pool.creator, ReputationAction.POOL_FILLED_ABOVE_60, poolPtr.totalBettorStake, bytes32(poolId), block.timestamp);
         }
 
@@ -383,7 +394,7 @@ contract BitredictPool is Ownable {
         if (pool.usesBitr) {
             require(bitrToken.transferFrom(msg.sender, address(this), amount), "BITR transfer failed");
         } else {
-            require(msg.value == amount, "Incorrect STT amount");
+            require(msg.value == amount, "Incorrect MON amount");
         }
 
         emit BetPlaced(poolId, msg.sender, amount, true);
@@ -416,9 +427,9 @@ contract BitredictPool is Ownable {
         lpStakes[poolId][msg.sender] += amount;
         pool.totalCreatorSideStake += amount;
 
-        // ENHANCED STAKE LOGIC: Recalculate max bettor stake
-        // If no bets yet, use total creator side stake for immediate capacity increase
-        // If bets exceed creator's initial stake, also use total creator side stake
+        emit UserLiquidityAdded(poolId, msg.sender, amount, lpStakes[poolId][msg.sender]);
+        emit PoolVolumeUpdated(poolId, pool.totalBettorStake + pool.totalCreatorSideStake, poolBettors[poolId].length + poolLPs[poolId].length);
+
         uint256 effectiveCreatorSideStake = pool.creatorStake;
         if (pool.totalBettorStake == 0 || pool.totalBettorStake > pool.creatorStake) {
             effectiveCreatorSideStake = pool.totalCreatorSideStake;
@@ -433,7 +444,7 @@ contract BitredictPool is Ownable {
         if (pool.usesBitr) {
             require(bitrToken.transferFrom(msg.sender, address(this), amount), "BITR transfer failed");
         } else {
-            require(msg.value == amount, "Incorrect STT amount");
+            require(msg.value == amount, "Incorrect MON amount");
         }
 
         emit LiquidityAdded(poolId, msg.sender, amount);
@@ -480,7 +491,7 @@ contract BitredictPool is Ownable {
             require(bitrToken.transfer(msg.sender, lpStake), "BITR LP withdrawal failed");
         } else {
             (bool success, ) = payable(msg.sender).call{value: lpStake}("");
-            require(success, "STT LP withdrawal failed");
+            require(success, "MON LP withdrawal failed");
         }
         
         emit LiquidityAdded(poolId, msg.sender, 0); // 0 amount indicates withdrawal
@@ -506,7 +517,7 @@ contract BitredictPool is Ownable {
                     require(bitrToken.transfer(lp, stake), "BITR LP refund failed");
                 } else {
                     (bool success, ) = payable(lp).call{value: stake}("");
-                    require(success, "STT LP refund failed");
+                    require(success, "MON LP refund failed");
                 }
             }
         }
@@ -617,15 +628,15 @@ contract BitredictPool is Ownable {
                     if (pool.usesBitr) {
                         totalCollectedBITR += fee;
                     } else {
-                        totalCollectedSTT += fee;
+                        totalCollectedMON += fee;
                     }
                 }
 
                 // Reputation for high-value winning bets
-                uint256 minValueSTT = 10 * 1e18;  // 10 STT
+                uint256 minValueMON = 10 * 1e18;  // 10 MON
                 uint256 minValueBITR = 2000 * 1e18; // 2000 BITR
                 bool qualifiesForReputation = pool.usesBitr ? 
-                    (stake >= minValueBITR) : (stake >= minValueSTT);
+                    (stake >= minValueBITR) : (stake >= minValueMON);
                 
                 if (qualifiesForReputation) {
                     emit ReputationActionOccurred(msg.sender, ReputationAction.BET_WON_HIGH_VALUE, stake, bytes32(poolId), block.timestamp);
@@ -638,7 +649,7 @@ contract BitredictPool is Ownable {
                 require(bitrToken.transfer(msg.sender, payout), "BITR payout failed");
             } else {
                 (bool success, ) = payable(msg.sender).call{value: payout}("");
-                require(success, "STT payout failed");
+                require(success, "MON payout failed");
             }
             emit RewardClaimed(poolId, msg.sender, payout);
         }
@@ -658,16 +669,16 @@ contract BitredictPool is Ownable {
 
     function distributeFees(address stakingContract) external {
         require(msg.sender == feeCollector, "Only fee collector");
-        uint256 _stt = totalCollectedSTT;
+        uint256 _mon = totalCollectedMON;
         uint256 _bitr = totalCollectedBITR;
-
-        if (_stt > 0) {
-            uint256 sttStakers = (_stt * 30) / 100;
-            totalCollectedSTT = 0;
-            (bool success1, ) = payable(feeCollector).call{value: _stt - sttStakers}("");
-            require(success1, "STT fee collector transfer failed");
-            (bool success2, ) = payable(stakingContract).call{value: sttStakers}("");
-            require(success2, "STT staking transfer failed");
+        
+        if (_mon > 0) {
+            uint256 monStakers = (_mon * 30) / 100;
+            totalCollectedMON = 0;
+            (bool success1, ) = payable(feeCollector).call{value: _mon - monStakers}("");
+            require(success1, "MON fee collector transfer failed");
+            (bool success2, ) = payable(stakingContract).call{value: monStakers}("");
+            require(success2, "MON staking transfer failed");
         }
         
         if (_bitr > 0) {
@@ -677,8 +688,8 @@ contract BitredictPool is Ownable {
             bitrToken.transfer(stakingContract, bitrStakers);
         }
 
-        if (_stt > 0 || _bitr > 0) {
-            IBitredictStaking(stakingContract).addRevenue((_bitr * 30) / 100, (_stt * 30) / 100);
+        if (_mon > 0 || _bitr > 0) {
+            IBitrStaking(stakingContract).addRevenue((_bitr * 30) / 100, (_mon * 30) / 100);
         }
     }
 
@@ -751,7 +762,7 @@ contract BitredictPool is Ownable {
                     require(bitrToken.transfer(lp, stake), "BITR LP refund failed");
                 } else {
                     (bool success, ) = payable(lp).call{value: stake}("");
-                    require(success, "STT LP refund failed");
+                    require(success, "MON LP refund failed");
                 }
             }
         }
@@ -766,7 +777,7 @@ contract BitredictPool is Ownable {
                     require(bitrToken.transfer(bettor, stake), "BITR bettor refund failed");
                 } else {
                     (bool success, ) = payable(bettor).call{value: stake}("");
-                    require(success, "STT bettor refund failed");
+                    require(success, "MON bettor refund failed");
                 }
             }
         }
@@ -835,10 +846,10 @@ contract BitredictPool is Ownable {
             activeBoostCount[currentTier]--;
         }
         
-        // Charge boost fee (native STT only)
+        // Charge boost fee (native MON only)
         uint256 fee = boostFees[uint256(tier)];
         require(msg.value == fee, "Incorrect boost fee amount");
-        totalCollectedSTT += fee;
+        totalCollectedMON += fee;
         
         // Apply new boost
         poolBoostTier[poolId] = tier;
@@ -895,21 +906,21 @@ contract BitredictPool is Ownable {
         if (useBitr) {
             require(creatorStake >= minPoolStakeBITR, "BITR stake below minimum (1000 BITR)");
         } else {
-            require(creatorStake >= minPoolStakeSTT, "STT stake below minimum (5 STT)");
+            require(creatorStake >= minPoolStakeMON, "MON stake below minimum (5 MON)");
         }
         require(earliestEventStart > block.timestamp + bettingGracePeriod, "Event too soon");
         require(latestEventEnd > earliestEventStart, "Invalid event times");
         
         // Calculate creation fee based on token type
-        uint256 creationFee = useBitr ? creationFeeBITR : creationFeeSTT;
+        uint256 creationFee = useBitr ? creationFeeBITR : creationFeeMON;
         uint256 totalRequired = creationFee + creatorStake;
         
         if (useBitr) {
             require(bitrToken.transferFrom(msg.sender, address(this), totalRequired), "BITR transfer failed");
             totalCollectedBITR += creationFee;
         } else {
-            require(msg.value == totalRequired, "Incorrect STT amount");
-            totalCollectedSTT += creationFee;
+            require(msg.value == totalRequired, "Incorrect MON amount");
+            totalCollectedMON += creationFee;
         }
         
         // Calculate max bettor stake
@@ -977,7 +988,7 @@ contract BitredictPool is Ownable {
         if (pool.usesBitr) {
             require(bitrToken.transferFrom(msg.sender, address(this), amount), "BITR transfer failed");
         } else {
-            require(msg.value == amount, "Incorrect STT amount");
+            require(msg.value == amount, "Incorrect MON amount");
         }
         
         emit ComboBetPlaced(comboPoolId, msg.sender, amount);
@@ -1054,7 +1065,7 @@ contract BitredictPool is Ownable {
                     if (pool.usesBitr) {
                         totalCollectedBITR += fee;
                     } else {
-                        totalCollectedSTT += fee;
+                        totalCollectedMON += fee;
                     }
                 }
             }
@@ -1065,7 +1076,7 @@ contract BitredictPool is Ownable {
                 require(bitrToken.transfer(msg.sender, payout), "BITR payout failed");
             } else {
                 (bool success, ) = payable(msg.sender).call{value: payout}("");
-                require(success, "STT payout failed");
+                require(success, "MON payout failed");
             }
             emit RewardClaimed(comboPoolId, msg.sender, payout);
         }

@@ -11,32 +11,52 @@ class UnifiedResultsStorage {
   }
 
   /**
-   * Save fixture result to ALL result tables consistently
-   * This is the single source of truth for result storage
+   * Save fixture result to all relevant tables
+   * FIXED: Added comprehensive validation to prevent incomplete scores
    */
-  async saveFixtureResult(fixtureResult) {
-    console.log(`💾 Saving fixture result for ${fixtureResult.fixture_id} to all tables...`);
-    
+  async saveFixtureResult(result) {
     try {
-      await db.transaction(async (client) => {
-        // 1. Save to oracle.fixture_results (primary results table)
-        await this.saveToFixtureResults(client, fixtureResult);
+      // CRITICAL VALIDATION: Ensure we have complete scores before saving
+      if (result.home_score === null || result.away_score === null) {
+        console.error(`❌ CRITICAL ERROR: Cannot save incomplete scores for fixture ${result.fixture_id}`);
+        console.error(`   Home score: ${result.home_score}, Away score: ${result.away_score}`);
+        throw new Error(`Incomplete scores for fixture ${result.fixture_id}: home=${result.home_score}, away=${result.away_score}`);
+      }
+
+      // Additional validation: ensure scores are numbers
+      if (typeof result.home_score !== 'number' || typeof result.away_score !== 'number') {
+        console.error(`❌ CRITICAL ERROR: Invalid score types for fixture ${result.fixture_id}`);
+        console.error(`   Home score type: ${typeof result.home_score}, Away score type: ${typeof result.away_score}`);
+        throw new Error(`Invalid score types for fixture ${result.fixture_id}`);
+      }
+
+      // Ensure scores are non-negative
+      if (result.home_score < 0 || result.away_score < 0) {
+        console.error(`❌ CRITICAL ERROR: Negative scores for fixture ${result.fixture_id}`);
+        console.error(`   Home score: ${result.home_score}, Away score: ${result.away_score}`);
+        throw new Error(`Negative scores for fixture ${result.fixture_id}`);
+      }
+
+      console.log(`✅ Validated complete scores for fixture ${result.fixture_id}: ${result.home_score}-${result.away_score}`);
+
+      return await db.transaction(async (client) => {
+        // Save to fixture_results table
+        await this.saveToFixtureResults(client, result);
         
-        // 2. Update oracle.fixtures.result_info (JSON column)
-        await this.saveToFixturesResultInfo(client, fixtureResult);
+        // Save to fixtures.result_info JSON column
+        await this.saveToFixturesResultInfo(client, result);
         
-        // 3. Save to oracle.match_results (for Oddyssey resolution)
-        await this.saveToMatchResults(client, fixtureResult);
+        // Save to match_results table (for Oddyssey resolution)
+        await this.saveToMatchResults(client, result);
         
-        // 4. Update fixture status if needed
-        await this.updateFixtureStatus(client, fixtureResult);
+        // Update fixture status
+        await this.updateFixtureStatus(client, result);
         
-        console.log(`✅ Successfully saved result for fixture ${fixtureResult.fixture_id} to all tables`);
+        console.log(`✅ Successfully saved complete result for fixture ${result.fixture_id}`);
       });
       
-      return true;
     } catch (error) {
-      console.error(`❌ Error saving fixture result ${fixtureResult.fixture_id}:`, error);
+      console.error(`❌ Failed to save fixture result ${result.fixture_id}:`, error.message);
       throw error;
     }
   }
@@ -52,7 +72,7 @@ class UnifiedResultsStorage {
         outcome_1x2, outcome_ou25, outcome_ou35, outcome_ou15, outcome_btts,
         full_score, ht_score, finished_at, created_at, updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW(), NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW()
       )
       ON CONFLICT (fixture_id) DO UPDATE SET
         home_score = EXCLUDED.home_score,
@@ -78,10 +98,10 @@ class UnifiedResultsStorage {
     const values = [
       `result_${result.fixture_id}`,
       result.fixture_id,
-      result.home_score || null,
-      result.away_score || null,
-      result.ht_home_score || null,
-      result.ht_away_score || null,
+      result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
+      result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
+      result.ht_home_score !== null && result.ht_home_score !== undefined ? result.ht_home_score : null,
+      result.ht_away_score !== null && result.ht_away_score !== undefined ? result.ht_away_score : null,
       result.result_1x2 || null,
       result.result_ou25 || null,
       result.result_ou35 || null,
@@ -118,8 +138,8 @@ class UnifiedResultsStorage {
 
     await client.query(query, [
       JSON.stringify(result),
-      result.home_score,
-      result.away_score,
+      result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
+      result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
       result.fixture_id
     ]);
   }
@@ -146,10 +166,10 @@ class UnifiedResultsStorage {
 
     await client.query(query, [
       result.fixture_id,
-      result.home_score || null,
-      result.away_score || null,
-      result.ht_home_score || null,
-      result.ht_away_score || null,
+      result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
+      result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
+      result.ht_home_score !== null && result.ht_home_score !== undefined ? result.ht_home_score : null,
+      result.ht_away_score !== null && result.ht_away_score !== undefined ? result.ht_away_score : null,
       result.result_1x2 || null,
       result.result_ou25 || null,
       result.finished_at || new Date()

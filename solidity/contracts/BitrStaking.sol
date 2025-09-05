@@ -5,9 +5,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract BitredictStaking is Ownable, ReentrancyGuard {
+contract BitrStaking is Ownable, ReentrancyGuard {
     IERC20 public bitrToken;
-    // STT is native coin, not ERC20
+    // MON is native coin, not ERC20
 
     uint256 private constant REWARD_PRECISION = 1e18;
     uint256 private constant SECONDS_PER_YEAR = 365 days;
@@ -26,7 +26,7 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         uint8 durationOption; // 0 = 3d, 1 = 5d, 2 = 7d (testnet)
         uint256 claimedRewardBITR;
         uint256 rewardDebtBITR;
-        uint256 rewardDebtSTT;
+        uint256 rewardDebtMON;
     }
 
     mapping(address => Stake[]) public userStakes;
@@ -39,16 +39,16 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
     uint256 public distributionInterval = 30 days;
 
     uint256 public revenuePoolBITR;
-    uint256 public revenuePoolSTT;
+    uint256 public revenuePoolMON;
 
     mapping(uint8 => uint256) public totalStakedInTier;
     mapping(uint8 => uint256) public accRewardPerShareBITR;
-    mapping(uint8 => uint256) public accRewardPerShareSTT;
+    mapping(uint8 => uint256) public accRewardPerShareMON;
 
     mapping(address => uint256) public pendingRevenueBITR;
-    mapping(address => uint256) public pendingRevenueSTT;
+    mapping(address => uint256) public pendingRevenueMON;
 
-    // Integration with BitredictPool
+    // Integration with BitrPool
     mapping(address => bool) public authorizedPools;
     
     // Total statistics
@@ -59,9 +59,9 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
     event Staked(address indexed user, uint256 amount, uint8 tier, uint8 duration);
     event Claimed(address indexed user, uint256 bitrAmount);
     event Unstaked(address indexed user, uint256 amount);
-    event RevenueAdded(uint256 bitrAmount, uint256 sttAmount);
+    event RevenueAdded(uint256 bitrAmount, uint256 monAmount);
     event RevenueDistributed();
-    event RevenueClaimed(address indexed user, uint256 bitrAmount, uint256 sttAmount);
+    event RevenueClaimed(address indexed user, uint256 bitrAmount, uint256 monAmount);
     event PoolAuthorized(address indexed pool, bool authorized);
 
     constructor(address _bitr) Ownable(msg.sender) {
@@ -94,7 +94,7 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         emit PoolAuthorized(_pool, _authorized);
     }
 
-    // Accepts BITR as ERC20, STT as native coin
+    // Accepts BITR as ERC20, MON as native coin
     function addRevenueFromPool(uint256 _bitrAmount) external payable {
         require(authorizedPools[msg.sender], "Unauthorized pool");
         _addRevenue(_bitrAmount, msg.value);
@@ -104,15 +104,15 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         _addRevenue(_bitrAmount, msg.value);
     }
 
-    function _addRevenue(uint256 _bitrAmount, uint256 _sttAmount) internal {
+    function _addRevenue(uint256 _bitrAmount, uint256 _monAmount) internal {
         if (_bitrAmount > 0) {
             bitrToken.transferFrom(msg.sender, address(this), _bitrAmount);
             revenuePoolBITR += _bitrAmount;
         }
-        if (_sttAmount > 0) {
-            revenuePoolSTT += _sttAmount;
+        if (_monAmount > 0) {
+            revenuePoolMON += _monAmount;
         }
-        emit RevenueAdded(_bitrAmount, _sttAmount);
+        emit RevenueAdded(_bitrAmount, _monAmount);
     }
 
     function fundAPYRewards(uint256 _amount) external onlyOwner {
@@ -125,14 +125,14 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         lastRevenueDistribution = block.timestamp;
 
         uint256 totalBITR = revenuePoolBITR;
-        uint256 totalSTT = revenuePoolSTT;
-
-        if (totalBITR == 0 && totalSTT == 0) {
+        uint256 totalMON = revenuePoolMON;
+        
+        if (totalBITR == 0 && totalMON == 0) {
             return;
         }
 
         revenuePoolBITR = 0;
-        revenuePoolSTT = 0;
+        revenuePoolMON = 0;
 
         for (uint8 i = 0; i < tiers.length; i++) {
             uint256 totalStakedTier = totalStakedInTier[i];
@@ -142,13 +142,13 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
 
             uint256 tierShare = tiers[i].revenueShareRate;
             uint256 tierRevenueBITR = (totalBITR * tierShare) / BASIS_POINTS;
-            uint256 tierRevenueSTT = (totalSTT * tierShare) / BASIS_POINTS;
+            uint256 tierRevenueMON = (totalMON * tierShare) / BASIS_POINTS;
 
             if (tierRevenueBITR > 0) {
                 accRewardPerShareBITR[i] += (tierRevenueBITR * REWARD_PRECISION) / totalStakedTier;
             }
-            if (tierRevenueSTT > 0) {
-                accRewardPerShareSTT[i] += (tierRevenueSTT * REWARD_PRECISION) / totalStakedTier;
+            if (tierRevenueMON > 0) {
+                accRewardPerShareMON[i] += (tierRevenueMON * REWARD_PRECISION) / totalStakedTier;
             }
         }
 
@@ -160,20 +160,20 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
             Stake storage s = userStakes[_user][i];
 
             uint256 accBITR = accRewardPerShareBITR[s.tierId];
-            uint256 accSTT = accRewardPerShareSTT[s.tierId];
-
+            uint256 accMON = accRewardPerShareMON[s.tierId];
+            
             uint256 pendingBITR = (s.amount * accBITR) / REWARD_PRECISION - s.rewardDebtBITR;
-            uint256 pendingSTT = (s.amount * accSTT) / REWARD_PRECISION - s.rewardDebtSTT;
+            uint256 pendingMON = (s.amount * accMON) / REWARD_PRECISION - s.rewardDebtMON;
 
             if (pendingBITR > 0) {
                 pendingRevenueBITR[_user] += pendingBITR;
             }
-            if (pendingSTT > 0) {
-                pendingRevenueSTT[_user] += pendingSTT;
+            if (pendingMON > 0) {
+                pendingRevenueMON[_user] += pendingMON;
             }
-
+            
             s.rewardDebtBITR = (s.amount * accBITR) / REWARD_PRECISION;
-            s.rewardDebtSTT = (s.amount * accSTT) / REWARD_PRECISION;
+            s.rewardDebtMON = (s.amount * accMON) / REWARD_PRECISION;
         }
     }
 
@@ -181,25 +181,25 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         _harvestRevenueRewards(msg.sender);
 
         uint256 bitrAmount = pendingRevenueBITR[msg.sender];
-        uint256 sttAmount = pendingRevenueSTT[msg.sender];
-
-        require(bitrAmount > 0 || sttAmount > 0, "Nothing to claim");
-
+        uint256 monAmount = pendingRevenueMON[msg.sender];
+        
+        require(bitrAmount > 0 || monAmount > 0, "Nothing to claim");
+        
         pendingRevenueBITR[msg.sender] = 0;
-        pendingRevenueSTT[msg.sender] = 0;
+        pendingRevenueMON[msg.sender] = 0;
 
         if (bitrAmount > 0) {
             require(bitrToken.balanceOf(address(this)) >= bitrAmount, "Insufficient BITR balance");
             bitrToken.transfer(msg.sender, bitrAmount);
             totalRevenuePaid += bitrAmount;
         }
-        if (sttAmount > 0) {
-            require(address(this).balance >= sttAmount, "Insufficient STT balance");
-            (bool success, ) = payable(msg.sender).call{value: sttAmount}("");
-            require(success, "STT transfer failed");
+        if (monAmount > 0) {
+            require(address(this).balance >= monAmount, "Insufficient MON balance");
+            (bool success, ) = payable(msg.sender).call{value: monAmount}("");
+            require(success, "MON transfer failed");
         }
 
-        emit RevenueClaimed(msg.sender, bitrAmount, sttAmount);
+        emit RevenueClaimed(msg.sender, bitrAmount, monAmount);
     }
 
     function stake(uint256 _amount, uint8 _tierId, uint8 _durationOption) 
@@ -221,7 +221,7 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
                 durationOption: _durationOption,
                 claimedRewardBITR: 0,
                 rewardDebtBITR: (_amount * accRewardPerShareBITR[_tierId]) / REWARD_PRECISION,
-                rewardDebtSTT: (_amount * accRewardPerShareSTT[_tierId]) / REWARD_PRECISION
+                rewardDebtMON: (_amount * accRewardPerShareMON[_tierId]) / REWARD_PRECISION
             })
         );
         totalStakedInTier[_tierId] += _amount;
@@ -306,14 +306,14 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         external 
         view 
         validStakeIndex(_user, _index) 
-        returns (uint256 apyReward, uint256 pendingBITR, uint256 pendingSTT) 
+        returns (uint256 apyReward, uint256 pendingBITR, uint256 pendingMON) 
     {
         apyReward = calculateRewards(_user, _index);
         Stake memory s = userStakes[_user][_index];
         uint256 accBITR = accRewardPerShareBITR[s.tierId];
-        uint256 accSTT = accRewardPerShareSTT[s.tierId];
+        uint256 accMON = accRewardPerShareMON[s.tierId];
         pendingBITR = (s.amount * accBITR) / REWARD_PRECISION - s.rewardDebtBITR;
-        pendingSTT = (s.amount * accSTT) / REWARD_PRECISION - s.rewardDebtSTT;
+        pendingMON = (s.amount * accMON) / REWARD_PRECISION - s.rewardDebtMON;
     }
 
     function getUserTotalStaked(address _user) external view returns (uint256 total) {
@@ -332,13 +332,13 @@ contract BitredictStaking is Ownable, ReentrancyGuard {
         uint256 _totalRewardsPaid,
         uint256 _totalRevenuePaid,
         uint256 _contractBITRBalance,
-        uint256 _contractSTTBalance
+        uint256 _contractMONBalance
     ) {
         _totalStaked = totalStaked;
         _totalRewardsPaid = totalRewardsPaid;
         _totalRevenuePaid = totalRevenuePaid;
         _contractBITRBalance = bitrToken.balanceOf(address(this));
-        _contractSTTBalance = address(this).balance;
+        _contractMONBalance = address(this).balance;
     }
 
     function getTierStats() external view returns (

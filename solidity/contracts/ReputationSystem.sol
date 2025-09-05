@@ -5,7 +5,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title ReputationSystem
- * @dev Manages user reputation scores on-chain for access control
+ * @notice Manages user reputation scores on-chain for access control on Monad Testnet
+ * @dev Optimized for Monad's 400ms blocks and 10,000 TPS throughput
  */
 contract ReputationSystem is Ownable {
     

@@ -70,7 +70,7 @@ class HealthMonitor {
         healthCheck.services.blockchain = {
           status: 'connected',
           rpc: process.env.RPC_URL || 'default',
-          network: 'somnia'
+          network: 'monad'
         };
       } catch (error) {
         healthCheck.services.blockchain = {

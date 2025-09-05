@@ -29,7 +29,7 @@ export default function Home() {
   return (
     <Layout
       title={`Welcome to ${siteConfig.title}`}
-      description="Decentralized Prediction Markets on Somnia Network">
+      description="Decentralized Prediction Markets on Monad Network">
       <HomepageHeader />
       <main>
         <div className="container" style={{ padding: '2rem 0' }}>

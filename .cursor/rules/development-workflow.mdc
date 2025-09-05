@@ -20,7 +20,7 @@ Rule 4: Smart Contract Development
 - Compile contracts with `cd solidity && npx hardhat compile`
 - Test contracts with `cd solidity && npx hardhat test`
 - Deploy with Hardhat Ignition modules
-- Use `npm run deploy:somnia` for production deployment
+- Use `npm run deploy:monad` for production deployment
 description:
 globs:
 alwaysApply: false

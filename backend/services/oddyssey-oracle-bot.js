@@ -332,27 +332,30 @@ class OddysseyOracleBot {
   async getContractMatchesFromCycle(cycleId) {
     try {
       const result = await db.query(`
-        SELECT 
-          fixture_id, home_team, away_team, league_name, match_date,
-          home_odds, draw_odds, away_odds, over_25_odds, under_25_odds, display_order
-        FROM oracle.daily_game_matches dgm
-        JOIN oracle.oddyssey_cycles oc ON DATE(dgm.game_date) = DATE(oc.game_date)
-        WHERE oc.id = $1
-        ORDER BY dgm.display_order ASC
+        SELECT matches_data
+        FROM oracle.oddyssey_cycles
+        WHERE cycle_id = $1
       `, [cycleId]);
 
-      const matches = result.rows.map(match => {
-        const startTime = Math.floor(new Date(match.match_date).getTime() / 1000);
-        
+      if (result.rows.length === 0) {
+        throw new Error(`Cycle ${cycleId} not found`);
+      }
+
+      const matchesData = result.rows[0].matches_data;
+      if (!matchesData || !Array.isArray(matchesData)) {
+        throw new Error(`No matches data found for cycle ${cycleId}`);
+      }
+
+      const matches = matchesData.map(match => {
         return {
-          id: BigInt(match.fixture_id),
-          startTime: startTime,
-          oddsHome: Math.round(parseFloat(match.home_odds) * 1000),
-          oddsDraw: Math.round(parseFloat(match.draw_odds) * 1000),
-          oddsAway: Math.round(parseFloat(match.away_odds) * 1000),
-          oddsOver: Math.round(parseFloat(match.over_25_odds) * 1000),
-          oddsUnder: Math.round(parseFloat(match.under_25_odds) * 1000),
-          result: {
+          id: BigInt(match.id),
+          startTime: match.startTime,
+          oddsHome: match.oddsHome,
+          oddsDraw: match.oddsDraw,
+          oddsAway: match.oddsAway,
+          oddsOver: match.oddsOver,
+          oddsUnder: match.oddsUnder,
+          result: match.result || {
             moneyline: 0, // NotSet
             overUnder: 0  // NotSet
           }

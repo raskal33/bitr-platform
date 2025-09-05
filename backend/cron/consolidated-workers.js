@@ -134,6 +134,11 @@ const jobs = {
     script: path.join(__dirname, 'airdrop-scheduler.js'),
     description: 'Airdrop Scheduler (Eligibility Calculation)'
   },
+  airdrop_indexer: {
+    schedule: null, // Runs continuously
+    script: path.join(__dirname, '../indexer_airdrop.js'),
+    description: 'Airdrop Blockchain Indexer (Continuous)'
+  },
   football_oracle_bot: {
     schedule: null, // Runs continuously
     script: path.join(__dirname, 'football-oracle-bot-process.js'),

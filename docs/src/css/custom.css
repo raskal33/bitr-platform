@@ -15,12 +15,12 @@
   --ifm-color-primary-lighter: #70DBFF;
   --ifm-color-primary-lightest: #97E5FF;
 
-  /* Somnia Brand Colors */
-  --somnia-cyan: #22C7FF;
-  --somnia-blue: #007BFF;
-  --somnia-violet: #8C00FF;
-  --somnia-magenta: #FF0080;
-  --somnia-indigo: #3C00A5;
+  /* Monad Brand Colors */
+  --monad-cyan: #22C7FF;
+  --monad-blue: #007BFF;
+  --monad-violet: #8C00FF;
+  --monad-magenta: #FF0080;
+  --monad-indigo: #3C00A5;
 
   /* System Colors */
   --ifm-background-color: #0A0A1A;

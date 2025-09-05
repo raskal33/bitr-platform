@@ -654,20 +654,39 @@ class AirdropIndexer {
 
       // Calculate final eligibility
       const isEligible = 
-        hadSTTActivity &&                    // Had STT activity before faucet
-        bitrActionCount >= 20 &&             // At least 20 BITR actions
+        hadSTTActivity &&                    // Had MON activity before faucet
+        bitrActionCount >= 30 &&             // At least 30 BITR actions
         hasStakingActivity &&                // Has staking activity
-        oddysseySlipCount >= 3 &&            // At least 3 Oddyssey slips
+        oddysseySlipCount >= 10 &&           // At least 10 Oddyssey slips
         !hasSuspiciousTransfers &&           // No suspicious transfers
         !isTransferOnlyRecipient;            // Not a transfer-only recipient
+
+      // Check for consolidation patterns (multiple wallets sending to one address)
+      const consolidationResult = await db.query(`
+        SELECT COUNT(DISTINCT from_address) as sender_count
+        FROM airdrop.transfer_patterns
+        WHERE to_address = $1 AND amount > 0
+      `, [userAddress]);
+      
+      const consolidationDetected = parseInt(consolidationResult.rows[0].sender_count) >= 3; // 3+ different senders
+
+      // Update final eligibility calculation to include consolidation detection
+      const finalIsEligible = 
+        hadSTTActivity &&                    // Had MON activity before faucet
+        bitrActionCount >= 30 &&             // At least 30 BITR actions
+        hasStakingActivity &&                // Has staking activity
+        oddysseySlipCount >= 10 &&           // At least 10 Oddyssey slips
+        !hasSuspiciousTransfers &&           // No suspicious transfers
+        !isTransferOnlyRecipient &&          // Not a transfer-only recipient
+        !consolidationDetected;              // No consolidation patterns
 
       // Update or insert eligibility record
       await db.query(`
         INSERT INTO airdrop.eligibility 
         (user_address, has_faucet_claim, faucet_claim_date, has_stt_activity_before_faucet, 
          bitr_action_count, has_staking_activity, oddyssey_slip_count, has_suspicious_transfers,
-         is_transfer_only_recipient, is_eligible, eligibility_updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+         is_transfer_only_recipient, consolidation_detected, is_eligible, eligibility_updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
         ON CONFLICT (user_address) DO UPDATE SET
           has_faucet_claim = $2,
           faucet_claim_date = $3,
@@ -677,7 +696,8 @@ class AirdropIndexer {
           oddyssey_slip_count = $7,
           has_suspicious_transfers = $8,
           is_transfer_only_recipient = $9,
-          is_eligible = $10,
+          consolidation_detected = $10,
+          is_eligible = $11,
           eligibility_updated_at = NOW(),
           updated_at = NOW()
       `, [
@@ -690,13 +710,14 @@ class AirdropIndexer {
         oddysseySlipCount,
         hasSuspiciousTransfers,
         isTransferOnlyRecipient,
-        isEligible
+        consolidationDetected,
+        finalIsEligible
       ]);
 
-      if (isEligible) {
+      if (finalIsEligible) {
         console.log(`✅ ${userAddress} is ELIGIBLE (${bitrActionCount} BITR actions, ${oddysseySlipCount} Oddyssey slips)`);
       } else {
-        console.log(`❌ ${userAddress} is NOT eligible (BITR: ${bitrActionCount}/20, Staking: ${hasStakingActivity}, Oddyssey: ${oddysseySlipCount}/3, STT: ${hadSTTActivity})`);
+        console.log(`❌ ${userAddress} is NOT eligible (BITR: ${bitrActionCount}/30, Staking: ${hasStakingActivity}, Oddyssey: ${oddysseySlipCount}/10, MON: ${hadSTTActivity}, Consolidation: ${consolidationDetected})`);
       }
       
     } catch (error) {

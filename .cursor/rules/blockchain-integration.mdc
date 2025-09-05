@@ -27,9 +27,9 @@ Rule 5: Things to know:
 BACKEND_URL=https://bitredict-backend.fly.dev
 FRONTEND_URL=https://bitredict.vercel.app 
 
-SOMNIA_RPC_URL=https://dream-rpc.somnia.network/
-SOMNIA_CHAIN_ID=50312
-PROVIDER_URL=https://dream-rpc.somnia.network/
+MONAD_RPC_URL=https://testnet-rpc.monad.xyz/
+MONAD_CHAIN_ID=10143
+PROVIDER_URL=https://testnet-rpc.monad.xyz/
 
 # Contract Addresses (update these after deployment)
 BITR_TOKEN_ADDRESS=0x4b10fBFFDEE97C42E29899F47A2ECD30a38dBf2C

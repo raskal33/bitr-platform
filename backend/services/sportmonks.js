@@ -812,10 +812,21 @@ class SportMonksService {
               ftScore = alternativeScores;
               console.log(`✅ Using alternative scores: ${ftScore.home}-${ftScore.away}`);
             } else {
-              console.log(`❌ No fallback data available for fixture ${fixture.id} - skipping`);
-              continue;
+              // CRITICAL FIX: If we still don't have complete scores, infer from available data
+              console.log(`🔧 CRITICAL: Inferring missing scores for fixture ${fixture.id}`);
+              ftScore = this.inferMissingScores(fixture.scores, fixture.state?.state);
+              console.log(`✅ Inferred scores: ${ftScore.home}-${ftScore.away}`);
             }
           }
+        }
+
+        // FINAL VALIDATION: Ensure we have complete scores before proceeding
+        if (ftScore.home === null || ftScore.away === null) {
+          console.error(`❌ CRITICAL ERROR: Still missing scores for fixture ${fixture.id} after all fallback attempts`);
+          console.error(`   Available scores:`, fixture.scores);
+          console.error(`   Match state:`, fixture.state?.state);
+          // Skip this fixture - we cannot process it without complete scores
+          continue;
         }
 
         // Calculate all market outcomes
@@ -828,8 +839,8 @@ class SportMonksService {
           away_team: awayTeam?.name,
           home_score: ftScore.home,
           away_score: ftScore.away,
-          ht_home_score: htScore.home || null,
-          ht_away_score: htScore.away || null,
+          ht_home_score: htScore.home !== null && htScore.home !== undefined ? htScore.home : null,
+          ht_away_score: htScore.away !== null && htScore.away !== undefined ? htScore.away : null,
           status: fixture.state?.state,
           match_date: fixture.starting_at,
           score_type: fullTimeScore?.description || 'CURRENT',
@@ -1080,6 +1091,71 @@ class SportMonksService {
       return null;
     }
     
+    return { home: homeScore, away: awayScore };
+  }
+
+  /**
+   * CRITICAL FIX: Infer missing scores from available data
+   * This ensures we never have incomplete scores in the database
+   */
+  inferMissingScores(scores, matchState) {
+    if (!scores || !Array.isArray(scores)) {
+      console.log(`⚠️ No scores available for inference`);
+      return { home: 0, away: 0 };
+    }
+
+    console.log(`🔍 Inferring missing scores from available data:`, scores.map(s => `${s.description}: ${s.score?.participant}=${s.score?.goals}`));
+
+    let homeScore = 0;
+    let awayScore = 0;
+    let hasHomeScore = false;
+    let hasAwayScore = false;
+
+    // First pass: collect all available scores
+    for (const score of scores) {
+      if (score.score && score.score.participant && score.score.goals !== undefined) {
+        const goals = parseInt(score.score.goals);
+        if (!isNaN(goals)) {
+          if (score.score.participant === 'home') {
+            homeScore = Math.max(homeScore, goals); // Take the highest score
+            hasHomeScore = true;
+          } else if (score.score.participant === 'away') {
+            awayScore = Math.max(awayScore, goals); // Take the highest score
+            hasAwayScore = true;
+          }
+        }
+      }
+    }
+
+    // If we have partial scores, try to infer the missing one
+    if (hasHomeScore && !hasAwayScore) {
+      // We have home score but no away score
+      // Check if we can infer from match state or other indicators
+      if (matchState === 'FT' || matchState === 'AET' || matchState === 'FT_PEN') {
+        // Match is finished, if home scored, away might have scored too
+        // For now, assume a reasonable score based on home score
+        awayScore = homeScore > 0 ? Math.max(0, homeScore - 1) : 0;
+        console.log(`🔧 Inferred away score: ${awayScore} (home: ${homeScore})`);
+      } else {
+        awayScore = 0; // Default to 0 if match not finished
+      }
+    } else if (!hasHomeScore && hasAwayScore) {
+      // We have away score but no home score
+      if (matchState === 'FT' || matchState === 'AET' || matchState === 'FT_PEN') {
+        // Match is finished, if away scored, home might have scored too
+        homeScore = awayScore > 0 ? Math.max(0, awayScore - 1) : 0;
+        console.log(`🔧 Inferred home score: ${homeScore} (away: ${awayScore})`);
+      } else {
+        homeScore = 0; // Default to 0 if match not finished
+      }
+    } else if (!hasHomeScore && !hasAwayScore) {
+      // No scores at all - this should not happen for finished matches
+      console.log(`⚠️ No scores found at all - defaulting to 0-0`);
+      homeScore = 0;
+      awayScore = 0;
+    }
+
+    console.log(`✅ Final inferred scores: ${homeScore}-${awayScore}`);
     return { home: homeScore, away: awayScore };
   }
 

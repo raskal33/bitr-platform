@@ -1,12 +1,20 @@
 const { ethers } = require('ethers');
 
 class GasEstimator {
-  constructor(provider, contract) {
+  constructor(provider, contract, monadSettings = null) {
     this.provider = provider;
     this.contract = contract;
     this.gasPriceCache = null;
     this.cacheExpiry = 0;
     this.CACHE_DURATION = 30000; // 30 seconds
+    
+    // Monad-specific settings
+    this.monadSettings = monadSettings || {
+      baseFee: '50000000000', // 50 gwei
+      priorityFee: '2000000000', // 2 gwei
+      maxGasLimit: 30000000, // 30M gas
+      gasCharging: 'gas_limit' // Charges gas_limit, not gas_used
+    };
   }
 
   /**
@@ -15,7 +23,7 @@ class GasEstimator {
   async estimateGasWithFallback(functionName, args, options = {}) {
     const {
       buffer = 20, // Default 20% buffer
-      maxGasLimit = 5000000, // 5M gas limit
+      maxGasLimit = this.monadSettings.maxGasLimit, // Use Monad's 30M gas limit
       value = 0n,
       ...otherOptions
     } = options;
@@ -29,13 +37,14 @@ class GasEstimator {
       });
       
       const gasLimit = this.calculateGasLimit(estimate, buffer, maxGasLimit);
-      const totalCost = await this.calculateTotalCost(gasLimit, value);
+      const totalCost = await this.calculateMonadTotalCost(gasLimit, value);
       
       return {
         method: 'contract_estimate',
         estimate,
         gasLimit,
         totalCost,
+        monadWarning: 'Monad charges gas_limit, not gas_used!',
         error: null
       };
     } catch (error) {
@@ -90,7 +99,29 @@ class GasEstimator {
   }
 
   /**
-   * Calculate total cost including gas and value
+   * Calculate total transaction cost for Monad (charges gas_limit)
+   */
+  async calculateMonadTotalCost(gasLimit, value = 0n) {
+    const baseFee = BigInt(this.monadSettings.baseFee);
+    const priorityFee = BigInt(this.monadSettings.priorityFee);
+    const totalGasPrice = baseFee + priorityFee;
+    
+    // Monad charges gas_limit, not gas_used!
+    const gasCost = BigInt(gasLimit) * totalGasPrice;
+    const totalCost = gasCost + BigInt(value);
+    
+    return {
+      gasCost: ethers.formatEther(gasCost),
+      totalCost: ethers.formatEther(totalCost),
+      gasLimit,
+      baseFee: ethers.formatUnits(baseFee, 'gwei') + ' gwei',
+      priorityFee: ethers.formatUnits(priorityFee, 'gwei') + ' gwei',
+      warning: 'Monad charges full gas_limit, not actual gas_used'
+    };
+  }
+
+  /**
+   * Calculate total cost including gas and value (Legacy method)
    */
   async calculateTotalCost(gasLimit, value) {
     const gasPrice = await this.getOptimalGasPrice();
@@ -102,32 +133,33 @@ class GasEstimator {
    * Get predefined gas limits for common functions
    */
   getPredefinedGasLimit(functionName, args) {
+    // Monad-optimized gas limits (conservative since gas_limit is charged)
     const limits = {
-      // BitredictPool functions
-      'createPool': 9000000n, // Increased from 1.5M to 9M based on actual gas consumption analysis
-      'placeBet': 500000n,
-      'addLiquidity': 400000n,
-      'withdrawLiquidity': 300000n,
-      'withdrawCreatorStake': 600000n,
-      'settlePool': 800000n,
-      'settlePoolAutomatically': 1000000n,
-      'claim': 400000n,
-      'refundPool': 800000n,
-      'boostPool': 200000n,
-      'createComboPool': 2000000n,
-      'placeComboBet': 500000n,
-      'resolveComboCondition': 300000n,
-      'claimCombo': 400000n,
+      // BitredictPool functions - reduced for Monad efficiency
+      'createPool': 5000000n, // Reduced from 9M - Monad charges gas_limit!
+      'placeBet': 300000n, // Reduced from 500k
+      'addLiquidity': 250000n, // Reduced from 400k
+      'withdrawLiquidity': 200000n, // Reduced from 300k
+      'withdrawCreatorStake': 400000n, // Reduced from 600k
+      'settlePool': 500000n, // Reduced from 800k
+      'settlePoolAutomatically': 600000n, // Reduced from 1M
+      'claim': 250000n, // Reduced from 400k
+      'refundPool': 500000n, // Reduced from 800k
+      'boostPool': 150000n, // Reduced from 200k
+      'createComboPool': 1200000n, // Reduced from 2M
+      'placeComboBet': 300000n, // Reduced from 500k
+      'resolveComboCondition': 200000n, // Reduced from 300k
+      'claimCombo': 250000n, // Reduced from 400k
       
-      // Oddyssey functions
-      'placeSlip': 800000n,
-      'evaluateSlip': 600000n,
-      'claimPrize': 300000n,
-      'evaluateMultipleSlips': 1000000n,
-      'claimMultiplePrizes': 500000n,
-      'startDailyCycle': 2000000n,
-      'resolveDailyCycle': 1500000n,
-      'resolveMultipleCycles': 3000000n,
+      // Oddyssey functions - optimized for Monad
+      'placeSlip': 500000n, // Reduced from 800k
+      'evaluateSlip': 400000n, // Reduced from 600k
+      'claimPrize': 200000n, // Reduced from 300k
+      'evaluateMultipleSlips': 600000n, // Reduced from 1M
+      'claimMultiplePrizes': 300000n, // Reduced from 500k
+      'startDailyCycle': 1200000n, // Reduced from 2M
+      'resolveDailyCycle': 1000000n, // Reduced from 1.5M
+      'resolveMultipleCycles': 2000000n, // Reduced from 3M
       
       // Token functions
       'approve': 100000n,

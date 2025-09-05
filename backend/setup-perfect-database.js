@@ -133,6 +133,19 @@ async function setupPerfectDatabase() {
       'oracle.slip_evaluation_jobs',
       'oracle.system_alerts',
       'oracle.cron_job_logs',
+      'oracle.combo_pools',
+      'oracle.fixture_mappings',
+      'oracle.indexed_blocks',
+      'oracle.indexer_state',
+      'oracle.monitoring_alerts',
+      'oracle.monitoring_metrics',
+      'oracle.cycle_health_checks',
+      'oracle.cycle_health_reports',
+      'oracle.oddyssey_prize_rollovers',
+      'oracle.pool_claims',
+      'oracle.pool_liquidity_providers',
+      'oracle.pool_refunds',
+      'oracle.system_health_checks',
       // Oddyssey schema
       'oddyssey.daily_games',
       'oddyssey.oddyssey_slip_selections',
@@ -140,6 +153,7 @@ async function setupPerfectDatabase() {
       'oddyssey.slip_entries',
       'oddyssey.game_results',
       'oddyssey.cycle_status',
+      'oddyssey.events',
       // Analytics schema
       'analytics.user_analytics',
       'analytics.market_analytics',
@@ -182,7 +196,9 @@ async function setupPerfectDatabase() {
       'public.seasons',
       'public.teams',
       'public.transactions',
-      'public.users'
+      'public.users',
+      // Neon Auth schema
+      'neon_auth.users_sync'
     ];
     
     for (const tableName of expectedTables) {
@@ -243,14 +259,14 @@ async function setupPerfectDatabase() {
     const tableCount = await db.query(`
       SELECT COUNT(*) as count 
       FROM information_schema.tables 
-      WHERE table_schema IN ('oracle', 'oddyssey', 'analytics', 'system', 'crypto')
+      WHERE table_schema IN ('oracle', 'oddyssey', 'analytics', 'system', 'crypto', 'core', 'airdrop', 'prediction', 'public', 'neon_auth')
     `);
     
     const configCount = await db.query('SELECT COUNT(*) as count FROM system.config');
     const dailyGameCount = await db.query('SELECT COUNT(*) as count FROM oddyssey.daily_games');
     
     console.log(`✅ Database setup complete!`);
-    console.log(`   📊 Total tables: ${tableCount.rows[0].count} (expected: 97)`);
+    console.log(`   📊 Total tables: ${tableCount.rows[0].count} (expected: 117+)`);
     console.log(`   ⚙️  System configs: ${configCount.rows[0].count}`);
     console.log(`   🎮 Daily games: ${dailyGameCount.rows[0].count}`);
     

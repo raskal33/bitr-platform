@@ -629,10 +629,10 @@ class UnifiedResultsManager {
         `, [
           `result_${result.fixture_id}`,
           result.fixture_id,
-          result.home_score || null,
-          result.away_score || null,
-          result.ht_home_score || null,
-          result.ht_away_score || null,
+          result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
+          result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
+          result.ht_home_score !== null && result.ht_home_score !== undefined ? result.ht_home_score : null,
+          result.ht_away_score !== null && result.ht_away_score !== undefined ? result.ht_away_score : null,
           result.result_1x2 || null,
           result.result_ou25 || null
         ]);
@@ -728,10 +728,10 @@ class UnifiedResultsManager {
       `, [
         `match_result_${result.fixture_id}`,
         result.fixture_id,
-        result.home_score || null,
-        result.away_score || null,
-        result.ht_home_score || null,
-        result.ht_away_score || null,
+        result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
+        result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
+        result.ht_home_score !== null && result.ht_home_score !== undefined ? result.ht_home_score : null,
+        result.ht_away_score !== null && result.ht_away_score !== undefined ? result.ht_away_score : null,
         outcomes.outcome_1x2,
         outcomes.outcome_ou05,
         outcomes.outcome_ou15,

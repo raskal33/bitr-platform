@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("BitredictStaking", function () {
+describe("BitrStaking", function () {
     let stakingContract;
     let bitrToken;
     let sttToken;
@@ -22,8 +22,8 @@ describe("BitredictStaking", function () {
         const MockToken = await ethers.getContractFactory("MockERC20");
         bitrToken = await MockToken.deploy("BITR Token", "BITR");
 
-        // Deploy staking contract (STT is native)
-        const Staking = await ethers.getContractFactory("BitredictStaking");
+        // Deploy staking contract (MON is native)
+        const Staking = await ethers.getContractFactory("BitrStaking");
         stakingContract = await Staking.deploy(await bitrToken.getAddress());
 
         // Distribute BITR tokens to users
@@ -312,14 +312,14 @@ describe("BitredictStaking", function () {
 
         it("Should add revenue correctly", async function () {
             const bitrAmount = ethers.parseEther("1000");
-            const sttAmount = ethers.parseEther("0.5");
-
-            await expect(stakingContract.addRevenue(bitrAmount, { value: sttAmount }))
+            const monAmount = ethers.parseEther("0.5");
+            
+            await expect(stakingContract.addRevenue(bitrAmount, { value: monAmount }))
                 .to.emit(stakingContract, "RevenueAdded")
-                .withArgs(bitrAmount, sttAmount);
+                .withArgs(bitrAmount, monAmount);
 
             expect(await stakingContract.revenuePoolBITR()).to.equal(bitrAmount);
-            expect(await stakingContract.revenuePoolSTT()).to.equal(sttAmount);
+            expect(await stakingContract.revenuePoolMON()).to.equal(monAmount);
         });
 
         it("Should reject revenue addition from non-owner", async function () {
@@ -329,10 +329,10 @@ describe("BitredictStaking", function () {
 
         it("Should distribute revenue correctly across tiers", async function () {
             const bitrAmount = ethers.parseEther("1000");
-            const sttAmount = ethers.parseEther("0.5");
-
+            const monAmount = ethers.parseEther("0.5");
+            
             // Add revenue
-            await stakingContract.addRevenue(bitrAmount, { value: sttAmount });
+            await stakingContract.addRevenue(bitrAmount, { value: monAmount });
 
             // Fast forward past distribution interval
             await ethers.provider.send("evm_increaseTime", [31 * 24 * 60 * 60]);
@@ -343,7 +343,7 @@ describe("BitredictStaking", function () {
 
             // Check that revenue pools are cleared
             expect(await stakingContract.revenuePoolBITR()).to.equal(0);
-            expect(await stakingContract.revenuePoolSTT()).to.equal(0);
+            expect(await stakingContract.revenuePoolMON()).to.equal(0);
 
             // Check that accumulator values are updated
             expect(await stakingContract.accRewardPerShareBITR(0)).to.be.gt(0);
@@ -510,7 +510,7 @@ describe("BitredictStaking", function () {
 
         it("Should handle revenue distribution with no stakers", async function () {
             // Create fresh contract with no stakes
-            const Staking = await ethers.getContractFactory("BitredictStaking");
+            const Staking = await ethers.getContractFactory("BitrStaking");
             const freshStaking = await Staking.deploy(await bitrToken.getAddress());
             
             await bitrToken.approve(await freshStaking.getAddress(), ethers.parseEther("1000"));
@@ -552,10 +552,10 @@ describe("BitredictStaking", function () {
             await ethers.provider.send("evm_increaseTime", [15 * 24 * 60 * 60]);
             await ethers.provider.send("evm_mine");
             
-            const [apyReward, pendingBITR, pendingSTT] = await stakingContract.getPendingRewards(user1.address, 0);
+            const [apyReward, pendingBITR, pendingMON] = await stakingContract.getPendingRewards(user1.address, 0);
             expect(apyReward).to.be.gt(0);
             expect(pendingBITR).to.equal(0); // No revenue distributed yet
-            expect(pendingSTT).to.equal(0);
+            expect(pendingMON).to.equal(0);
         });
 
         it("Should return correct user total staked", async function () {
@@ -569,14 +569,14 @@ describe("BitredictStaking", function () {
         it("Should return correct contract stats", async function () {
             await stakingContract.connect(user1).stake(TIER_0_MIN, 0, 0);
             
-            const [totalStaked, totalRewardsPaid, totalRevenuePaid, contractBITR, contractSTT] = 
+            const [totalStaked, totalRewardsPaid, totalRevenuePaid, contractBITR, contractMON] = 
                 await stakingContract.getContractStats();
             
             expect(totalStaked).to.equal(TIER_0_MIN);
             expect(totalRewardsPaid).to.equal(0); // No rewards claimed yet
             expect(totalRevenuePaid).to.equal(0); // No revenue claimed yet
             expect(contractBITR).to.be.gt(0); // Has funded APY rewards
-            expect(contractSTT).to.equal(0);
+            expect(contractMON).to.equal(0);
         });
 
         it("Should return correct tier stats", async function () {

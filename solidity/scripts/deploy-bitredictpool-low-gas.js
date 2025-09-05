@@ -1,7 +1,7 @@
 const { ethers } = require("hardhat");
 
 async function main() {
-  console.log("🚀 Deploying BitredictPool contract to Somnia Network (Low Gas)...");
+  console.log("🚀 Deploying BitredictPool contract to Monad Testnet (Low Gas)...");
 
   // Get the deployer account
   const [deployer] = await ethers.getSigners();
@@ -9,7 +9,7 @@ async function main() {
   const provider = ethers.provider;
   
   console.log("📝 Deploying contracts with account:", deployerAddress);
-  console.log("💰 Account balance:", ethers.formatEther(await provider.getBalance(deployerAddress)), "STT");
+  console.log("💰 Account balance:", ethers.formatEther(await provider.getBalance(deployerAddress)), "MON");
 
   // Check if we're on the correct network
   const network = await provider.getNetwork();
@@ -54,9 +54,9 @@ async function main() {
   const deployedGuidedOracle = await bitredictPool.guidedOracle();
   const deployedOptimisticOracle = await bitredictPool.optimisticOracle();
   const poolCount = await bitredictPool.poolCount();
-  const creationFeeSTT = await bitredictPool.creationFeeSTT();
+  const creationFeeMON = await bitredictPool.creationFeeMON();
   const creationFeeBITR = await bitredictPool.creationFeeBITR();
-  const minPoolStakeSTT = await bitredictPool.minPoolStakeSTT();
+  const minPoolStakeMON = await bitredictPool.minPoolStakeMON();
   const minPoolStakeBITR = await bitredictPool.minPoolStakeBITR();
 
   console.log("📋 Deployment verification:");
@@ -65,9 +65,9 @@ async function main() {
   console.log("  - Guided Oracle:", deployedGuidedOracle);
   console.log("  - Optimistic Oracle:", deployedOptimisticOracle);
   console.log("  - Pool Count:", poolCount.toString());
-  console.log("  - Creation Fee STT:", ethers.formatEther(creationFeeSTT), "STT");
+  console.log("  - Creation Fee MON:", ethers.formatEther(creationFeeMON), "MON");
   console.log("  - Creation Fee BITR:", ethers.formatEther(creationFeeBITR), "BITR");
-  console.log("  - Min Pool Stake STT:", ethers.formatEther(minPoolStakeSTT), "STT");
+  console.log("  - Min Pool Stake MON:", ethers.formatEther(minPoolStakeMON), "MON");
   console.log("  - Min Pool Stake BITR:", ethers.formatEther(minPoolStakeBITR), "BITR");
 
   // Save deployment info
@@ -81,9 +81,9 @@ async function main() {
     feeCollector: deployerAddress,
     guidedOracle: GUIDED_ORACLE_ADDRESS,
     optimisticOracle: OPTIMISTIC_ORACLE_ADDRESS,
-    creationFeeSTT: ethers.formatEther(creationFeeSTT),
+    creationFeeMON: ethers.formatEther(creationFeeMON),
     creationFeeBITR: ethers.formatEther(creationFeeBITR),
-    minPoolStakeSTT: ethers.formatEther(minPoolStakeSTT),
+    minPoolStakeMON: ethers.formatEther(minPoolStakeMON),
     minPoolStakeBITR: ethers.formatEther(minPoolStakeBITR),
     deploymentTime: new Date().toISOString(),
     gasPrice: ethers.formatUnits(gasPrice, "gwei") + " gwei",

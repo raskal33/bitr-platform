@@ -143,17 +143,37 @@ class SimpleBulletproofService {
     
     try {
       const result = await db.query(`
-        SELECT 
-          fixture_id, home_team, away_team, league_name, match_date,
-          home_odds, draw_odds, away_odds, over_25_odds, under_25_odds
-        FROM oracle.fixtures
-        WHERE DATE(match_date) = $1
-        AND home_odds IS NOT NULL AND home_odds > 0
-        AND draw_odds IS NOT NULL AND draw_odds > 0
-        AND away_odds IS NOT NULL AND away_odds > 0
-        AND over_25_odds IS NOT NULL AND over_25_odds > 0
-        AND under_25_odds IS NOT NULL AND under_25_odds > 0
-        ORDER BY match_date ASC
+        WITH fixture_odds_summary AS (
+          SELECT 
+            f.id as fixture_id,
+            f.home_team,
+            f.away_team,
+            f.league_name,
+            f.starting_at as match_date,
+            MAX(CASE WHEN o.market_id = '1' AND o.label = 'Home' THEN o.value END) as home_odds,
+            MAX(CASE WHEN o.market_id = '1' AND o.label = 'Draw' THEN o.value END) as draw_odds,
+            MAX(CASE WHEN o.market_id = '1' AND o.label = 'Away' THEN o.value END) as away_odds,
+            MAX(CASE WHEN o.market_id = '80' AND o.label = 'Over' AND o.total = '2.500000' THEN o.value END) as over_25_odds,
+            MAX(CASE WHEN o.market_id = '80' AND o.label = 'Under' AND o.total = '2.500000' THEN o.value END) as under_25_odds
+          FROM oracle.fixtures f
+          INNER JOIN oracle.fixture_odds o ON f.id::VARCHAR = o.fixture_id
+          WHERE (DATE(f.starting_at) = $1 OR DATE(f.starting_at) = $1::date + INTERVAL '1 day')
+            AND f.status IN ('NS', 'Fixture')
+            AND o.market_id IN ('1', '80')  -- 1X2 and Over/Under 2.5
+            AND o.value > 0
+          GROUP BY f.id, f.home_team, f.away_team, f.league_name, f.starting_at
+        )
+        SELECT *
+        FROM fixture_odds_summary
+        WHERE home_odds IS NOT NULL AND home_odds > 0
+          AND draw_odds IS NOT NULL AND draw_odds > 0
+          AND away_odds IS NOT NULL AND away_odds > 0
+          AND over_25_odds IS NOT NULL AND over_25_odds > 0
+          AND under_25_odds IS NOT NULL AND under_25_odds > 0
+          AND EXTRACT(HOUR FROM match_date AT TIME ZONE 'UTC') >= 11
+        ORDER BY 
+          CASE WHEN DATE(match_date) = $1 THEN 0 ELSE 1 END, -- Prioritize today's matches
+          match_date ASC
         LIMIT 10
       `, [gameDate]);
 
@@ -161,25 +181,29 @@ class SimpleBulletproofService {
       
       for (const row of result.rows) {
         try {
-          // Validate odds
-          const validation = this.validator.validateDatabaseOdds(row);
-          
-          if (validation.isValid) {
-            // Transform to frontend format
-            const frontendMatch = this.pipeline.transformDatabaseToFrontend(row);
+          // Simple validation - just check that we have all required odds
+          if (row.home_odds && row.draw_odds && row.away_odds && row.over_25_odds && row.under_25_odds) {
+            // Convert to numbers and ensure they're reasonable
+            const homeOdds = parseFloat(row.home_odds);
+            const drawOdds = parseFloat(row.draw_odds);
+            const awayOdds = parseFloat(row.away_odds);
+            const overOdds = parseFloat(row.over_25_odds);
+            const underOdds = parseFloat(row.under_25_odds);
             
-            // Ensure no scientific notation
-            const hasScientificNotation = Object.values(frontendMatch.odds || {}).some(odds => 
-              this.validator.isScientificNotation(odds)
-            );
-            
-            if (!hasScientificNotation) {
-              validatedMatches.push(frontendMatch);
-            } else {
-              console.warn(`⚠️ Match ${row.fixture_id} has scientific notation, skipping`);
+            if (homeOdds > 1 && drawOdds > 1 && awayOdds > 1 && overOdds > 1 && underOdds > 1) {
+              validatedMatches.push({
+                fixture_id: row.fixture_id,
+                home_team: row.home_team,
+                away_team: row.away_team,
+                league_name: row.league_name,
+                match_date: row.match_date,
+                home_odds: homeOdds,
+                draw_odds: drawOdds,
+                away_odds: awayOdds,
+                over_25_odds: overOdds,
+                under_25_odds: underOdds
+              });
             }
-          } else {
-            console.warn(`⚠️ Match ${row.fixture_id} failed validation:`, validation.errors);
           }
         } catch (error) {
           console.warn(`⚠️ Error processing match ${row.fixture_id}:`, error.message);
@@ -198,75 +222,52 @@ class SimpleBulletproofService {
    */
   async createSimpleCycle(gameDate, matches) {
     const db = require('../db/db');
-    const client = await db.getClient();
     
     try {
-      await client.query('BEGIN');
+      // Get next cycle ID
+      const nextCycleResult = await db.query(`
+        SELECT COALESCE(MAX(cycle_id::bigint), 0) + 1 as next_cycle_id 
+        FROM oracle.oddyssey_cycles
+      `);
+      const cycleId = nextCycleResult.rows[0].next_cycle_id;
 
-      // Create cycle
-      const cycleResult = await client.query(`
-        INSERT INTO oracle.oddyssey_cycles (game_date, is_resolved, cycle_start_time)
-        VALUES ($1, FALSE, NOW())
-        RETURNING id
-      `, [gameDate]);
+      // Create cycle with matches data
+      const matchesData = matches.map((match, index) => ({
+        id: match.fixture_id,
+        startTime: Math.floor(new Date(match.match_date).getTime() / 1000),
+        oddsHome: Math.floor(match.home_odds * 1000),
+        oddsDraw: Math.floor(match.draw_odds * 1000), 
+        oddsAway: Math.floor(match.away_odds * 1000),
+        oddsOver: Math.floor(match.over_25_odds * 1000),
+        oddsUnder: Math.floor(match.under_25_odds * 1000),
+        result: { moneyline: 0, overUnder: 0 }
+      }));
 
-      const cycleId = cycleResult.rows[0].id;
+      const cycleResult = await db.query(`
+        INSERT INTO oracle.oddyssey_cycles (
+          cycle_id, matches_count, matches_data, cycle_start_time, 
+          cycle_end_time, is_resolved, created_at, updated_at
+        ) VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '6 hours', FALSE, NOW(), NOW())
+        RETURNING cycle_id
+      `, [cycleId, matches.length, JSON.stringify(matchesData)]);
 
-      // Store matches in daily_game_matches
-      for (let i = 0; i < matches.length; i++) {
-        const match = matches[i];
-        
-        await client.query(`
-          INSERT INTO oracle.daily_game_matches (
-            game_date, fixture_id, home_team, away_team, league_name, match_date,
-            home_odds, draw_odds, away_odds, over_25_odds, under_25_odds, display_order
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (game_date, fixture_id) DO UPDATE SET
-            home_team = EXCLUDED.home_team,
-            away_team = EXCLUDED.away_team,
-            league_name = EXCLUDED.league_name,
-            match_date = EXCLUDED.match_date,
-            home_odds = EXCLUDED.home_odds,
-            draw_odds = EXCLUDED.draw_odds,
-            away_odds = EXCLUDED.away_odds,
-            over_25_odds = EXCLUDED.over_25_odds,
-            under_25_odds = EXCLUDED.under_25_odds,
-            display_order = EXCLUDED.display_order
-        `, [
-          gameDate,
-          match.fixtureId,
-          match.homeTeam,
-          match.awayTeam,
-          match.leagueName,
-          match.matchDate,
-          parseFloat(match.odds.home),
-          parseFloat(match.odds.draw),
-          parseFloat(match.odds.away),
-          parseFloat(match.odds.over25),
-          parseFloat(match.odds.under25),
-          i + 1
-        ]);
-      }
-
-      await client.query('COMMIT');
-      
       console.log(`✅ Simple cycle ${cycleId} created with ${matches.length} matches`);
       return cycleId;
 
     } catch (error) {
-      await client.query('ROLLBACK');
+      console.error('❌ Error creating simple cycle:', error);
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   /**
-   * Get standardized matches for frontend API
+   * ROOT CAUSE FIX: Get standardized matches for frontend with bulletproof validation
    */
   async getStandardizedMatchesForFrontend(cycleId) {
     try {
       const db = require('../db/db');
+      
+      console.log(`🔍 [BULLETPROOF] Getting matches for cycle ${cycleId}`);
       
       // ROOT CAUSE FIX: Use cycle_id directly from daily_game_matches
       const result = await db.query(`
@@ -279,23 +280,36 @@ class SimpleBulletproofService {
         LIMIT 10
       `, [cycleId]);
 
+      console.log(`🔍 [BULLETPROOF] Database query result: ${result.rows.length} matches found`);
+
       if (result.rows.length === 0) {
+        console.log(`❌ [BULLETPROOF] No matches found for cycle ${cycleId}`);
         throw new Error(`No matches found for cycle ${cycleId}`);
       }
 
       const matches = [];
       for (const row of result.rows) {
         try {
+          console.log(`🔍 [BULLETPROOF] Processing match ${row.fixture_id}: ${row.home_team} vs ${row.away_team}`);
+          
           const frontendMatch = this.pipeline.transformDatabaseToFrontend(row);
+          console.log(`🔍 [BULLETPROOF] Transformed match:`, frontendMatch);
+          
           const serialized = this.pipeline.transformationRules.bigint.serializeForJson(frontendMatch);
+          console.log(`🔍 [BULLETPROOF] Serialized match:`, serialized);
           
           // ROOT CAUSE FIX: Convert to frontend-compatible format
           const compatibleMatch = this.convertToFrontendCompatibleFormat(serialized, row);
+          console.log(`🔍 [BULLETPROOF] Compatible match:`, compatibleMatch);
+          
           matches.push(compatibleMatch);
         } catch (error) {
           console.error(`❌ Error transforming match ${row.fixture_id}:`, error);
+          console.error(`❌ Match data:`, row);
         }
       }
+
+      console.log(`✅ [BULLETPROOF] Successfully processed ${matches.length} matches for cycle ${cycleId}`);
 
       return {
         success: true,
@@ -305,6 +319,7 @@ class SimpleBulletproofService {
       };
 
     } catch (error) {
+      console.error(`❌ [BULLETPROOF] Error in getStandardizedMatchesForFrontend:`, error);
       return {
         success: false,
         matches: [],

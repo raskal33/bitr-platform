@@ -9,11 +9,11 @@ async function main() {
   console.log("💰 Account balance:", (await ethers.provider.getBalance(deployer.address)).toString());
 
   // Contract parameters
-  const initialEntryFee = ethers.parseEther("0.5"); // 0.5 STT
+  const initialEntryFee = ethers.parseEther("0.5"); // 0.5 MON
   const devWallet = deployer.address; // Change this to your dev wallet
 
   console.log("📊 Contract parameters:");
-  console.log("  - Entry Fee: 0.5 STT");
+  console.log("  - Entry Fee: 0.5 MON");
   console.log("  - Dev Wallet:", devWallet);
 
   // Deploy the Oddyssey contract
@@ -36,7 +36,7 @@ async function main() {
   const deployedOracle = await oddyssey.oracle();
 
   console.log("📋 Deployment verification:");
-  console.log("  - Entry Fee:", ethers.formatEther(deployedEntryFee), "STT");
+  console.log("  - Entry Fee:", ethers.formatEther(deployedEntryFee), "MON");
   console.log("  - Dev Wallet:", deployedDevWallet);
   console.log("  - Oracle:", deployedOracle);
 

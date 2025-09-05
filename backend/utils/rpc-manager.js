@@ -10,8 +10,8 @@ const { ethers } = require('ethers');
 class RpcManager {
   constructor(rpcUrls = [], options = {}) {
     this.rpcUrls = rpcUrls.length > 0 ? rpcUrls : [
-      'https://dream-rpc.somnia.network/',
-      'https://rpc.ankr.com/somnia_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205'
+      'https://testnet-rpc.monad.xyz/',
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/'
     ];
     
     this.options = {

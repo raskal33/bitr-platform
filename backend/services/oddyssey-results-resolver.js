@@ -171,25 +171,28 @@ class OddysseyResultsResolver {
 
     for (const fixtureId of matchIds) {
       try {
-        // Check if we have results in our database first
-        let matchResult = await this.getResultFromDatabase(fixtureId);
+        // ALWAYS use database results first - no external fetching unless absolutely necessary
+        const matchResult = await this.getResultFromDatabase(fixtureId);
         
-        // If not in database, try to fetch from SportMonks
-        if (!matchResult.isResolved) {
-          console.log(`🔄 Fetching fresh result for fixture ${fixtureId}...`);
-          await this.fetchAndStoreResult(fixtureId);
-          matchResult = await this.getResultFromDatabase(fixtureId);
-        }
-
-        // Validate and update results with proper score calculation
-        if (matchResult.isResolved) {
-          const validatedResult = await this.validateAndUpdateResults(fixtureId);
-          if (validatedResult) {
-            matchResult = validatedResult;
+        // Only fetch from external API if we have NO result at all (not just unresolved)
+        if (!matchResult || matchResult.error === 'Fixture not found') {
+          console.log(`🔄 No database result for fixture ${fixtureId}, fetching from API...`);
+          try {
+            await this.fetchAndStoreResult(fixtureId);
+            const freshResult = await this.getResultFromDatabase(fixtureId);
+            results.push(freshResult);
+          } catch (fetchError) {
+            console.warn(`⚠️ Failed to fetch from API for ${fixtureId}:`, fetchError.message);
+            results.push({
+              fixtureId,
+              isResolved: false,
+              error: `No database result and API fetch failed: ${fetchError.message}`
+            });
           }
+        } else {
+          // Use database result as-is (resolved or not)
+          results.push(matchResult);
         }
-
-        results.push(matchResult);
 
       } catch (error) {
         console.warn(`⚠️ Failed to get result for fixture ${fixtureId}:`, error.message);
@@ -282,10 +285,12 @@ class OddysseyResultsResolver {
     const hasScores = match.home_score !== null && match.away_score !== null;
     const hasOutcomes = match.result_1x2 !== null && match.result_ou25 !== null;
     const isFinished = ['FT', 'AET', 'PEN', 'FT_PEN'].includes(match.status);
+    const isCancelledOrPostponed = ['CANC', 'POST', 'CANCELLED', 'POSTPONED'].includes(match.status);
     
     // A match is resolved if:
-    // 1. It's finished AND has BOTH scores AND outcomes
-    const isResolved = isFinished && hasScores && hasOutcomes;
+    // 1. It's finished AND has BOTH scores AND outcomes, OR
+    // 2. It's cancelled/postponed AND has default outcomes
+    const isResolved = (isFinished && hasScores && hasOutcomes) || (isCancelledOrPostponed && hasOutcomes);
 
     return {
       fixtureId: match.fixture_id,
@@ -682,8 +687,13 @@ class OddysseyResultsResolver {
             ELSE false
           END as has_outcomes,
           CASE 
+            WHEN f.status IN ('CANC', 'POST', 'CANCELLED', 'POSTPONED') THEN true
+            ELSE false
+          END as is_cancelled_or_postponed,
+          CASE 
             WHEN (f.status IN ('FT', 'AET', 'PEN', 'FT_PEN') AND fr.result_1x2 IS NOT NULL AND fr.result_ou25 IS NOT NULL) 
-                 OR (fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL) THEN true
+                 OR (fr.home_score IS NOT NULL AND fr.away_score IS NOT NULL)
+                 OR f.status IN ('CANC', 'POST', 'CANCELLED', 'POSTPONED') THEN true
             ELSE false
           END as is_resolved
         FROM oracle.fixtures f
@@ -703,6 +713,7 @@ class OddysseyResultsResolver {
       const finishedMatches = matches.filter(m => m.is_finished);
       const matchesWithScore = matches.filter(m => m.has_score);
       const matchesWithOutcomes = matches.filter(m => m.has_outcomes);
+      const cancelledOrPostponedMatches = matches.filter(m => m.is_cancelled_or_postponed);
       const resolvedMatches = matches.filter(m => m.is_resolved);
       
       console.log(`📊 Cycle ${cycle.cycle_id} status check:`);
@@ -710,24 +721,57 @@ class OddysseyResultsResolver {
       console.log(`   • Finished matches: ${finishedMatches.length}/10`);
       console.log(`   • Matches with scores: ${matchesWithScore.length}/10`);
       console.log(`   • Matches with outcomes: ${matchesWithOutcomes.length}/10`);
+      console.log(`   • Cancelled/Postponed matches: ${cancelledOrPostponedMatches.length}/10`);
       console.log(`   • Resolved matches: ${resolvedMatches.length}/10`);
       
       // Log individual match status for debugging
       matches.forEach((match, index) => {
-        const statusEmoji = match.is_finished ? '✅' : '⏳';
+        const statusEmoji = match.is_finished ? '✅' : (match.is_cancelled_or_postponed ? '🚫' : '⏳');
         const resolvedEmoji = match.is_resolved ? '✅' : '❌';
         const scoreText = match.has_score ? `${match.home_score}-${match.away_score}` : 'No score';
-        const outcomeText = match.has_outcomes ? `${match.result_1x2}/${match.result_ou25}` : 'No outcomes';
+        const outcomeText = match.has_outcomes ? `${match.result_1x2}/${match.result_ou25}` : (match.is_cancelled_or_postponed ? 'CANCELLED/POSTPONED' : 'No outcomes');
         console.log(`   ${statusEmoji}${resolvedEmoji} Match ${index + 1}: ${match.name} [${match.status}] ${scoreText} → ${outcomeText}`);
       });
 
-      // FIXED: Check if all matches are resolved (finished + outcomes OR scores)
+      // FIXED: Auto-mark matches as cancelled if they're past scheduled time by 2+ hours and still NS
+      const now = new Date();
+      const matchesToMarkCancelled = matches.filter(match => {
+        if (match.status === 'NS' && match.match_date) {
+          const matchTime = new Date(match.match_date);
+          const hoursSinceScheduled = (now - matchTime) / (1000 * 60 * 60);
+          return hoursSinceScheduled > 2; // More than 2 hours past scheduled time
+        }
+        return false;
+      });
+
+      if (matchesToMarkCancelled.length > 0) {
+        console.log(`🔄 Auto-marking ${matchesToMarkCancelled.length} matches as cancelled (past scheduled time by 2+ hours)`);
+        
+        for (const match of matchesToMarkCancelled) {
+          try {
+            await db.query(`
+              UPDATE oracle.fixtures 
+              SET status = 'CANC' 
+              WHERE id = $1
+            `, [match.id]);
+            console.log(`   ✅ Marked ${match.name} as cancelled`);
+          } catch (error) {
+            console.error(`   ❌ Failed to mark ${match.name} as cancelled:`, error.message);
+          }
+        }
+        
+        // Re-run the status check after marking matches as cancelled
+        console.log(`🔄 Re-checking cycle status after marking matches as cancelled...`);
+        return await this.shouldResolveCycle(cycle);
+      }
+
+      // FIXED: Check if all matches are resolved (finished + outcomes OR scores OR cancelled/postponed)
       const shouldResolve = resolvedMatches.length === 10;
       
       if (shouldResolve) {
         console.log(`🎯 Cycle ${cycle.cycle_id}: ALL 10 matches resolved ✅ READY FOR RESOLUTION`);
       } else {
-        console.log(`⏳ Cycle ${cycle.cycle_id}: Waiting for all matches to be resolved (${resolvedMatches.length}/10 resolved, ${finishedMatches.length}/10 finished, ${matchesWithOutcomes.length}/10 with outcomes)`);
+        console.log(`⏳ Cycle ${cycle.cycle_id}: Waiting for all matches to be resolved (${resolvedMatches.length}/10 resolved, ${finishedMatches.length}/10 finished, ${matchesWithOutcomes.length}/10 with outcomes, ${cancelledOrPostponedMatches.length}/10 cancelled/postponed)`);
         
         // Additional check: if matches should be finished based on time but aren't, try to fetch results
         if (finishedMatches.length < 10) {
@@ -847,4 +891,4 @@ class OddysseyResultsResolver {
   }
 }
 
-module.exports = OddysseyResultsResolver; 
+module.exports = OddysseyResultsResolver;

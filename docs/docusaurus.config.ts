@@ -16,7 +16,7 @@ const siteUrl = isDev
 
 const config: Config = {
   title: 'Bitredict Documentation',
-  tagline: 'Decentralized Prediction Markets on Somnia',
+  tagline: 'Decentralized Prediction Markets on Monad',
   favicon: 'img/favicon.svg',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -75,12 +75,12 @@ const config: Config = {
 
   themeConfig: {
     metadata: [
-      {name: 'keywords', content: 'bitredict, prediction markets, blockchain, somnia network, documentation'},
+      {name: 'keywords', content: 'bitredict, prediction markets, blockchain, monad network, documentation'},
       {name: 'twitter:card', content: 'summary_large_image'},
       {name: 'twitter:site', content: '@bitredict'},
       {name: 'og:type', content: 'website'},
       {name: 'og:title', content: 'Bitredict Documentation'},
-      {name: 'og:description', content: 'Documentation for Bitredict - Decentralized Prediction Markets on Somnia Network'},
+      {name: 'og:description', content: 'Documentation for Bitredict - Decentralized Prediction Markets on Monad Network'},
     ],
     // Replace with your project's social card
     image: 'img/bitredict-social-card.svg',
@@ -161,8 +161,8 @@ const config: Config = {
               href: 'https://bitredict.io',
             },
             {
-              label: 'Somnia Network',
-              href: 'https://somnia.network',
+              label: 'Monad Network',
+              href: 'https://monad.xyz',
             },
           ],
         },

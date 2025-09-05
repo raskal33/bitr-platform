@@ -125,11 +125,15 @@ contract Oddyssey is Ownable, ReentrancyGuard {
     event EntryFeeSet(uint256 indexed newFee);
     event CycleStarted(uint256 indexed cycleId, uint256 endTime);
     event SlipPlaced(uint256 indexed cycleId, address indexed player, uint256 indexed slipId);
+    event SlipEvaluated(uint256 indexed slipId, address indexed player, uint256 indexed cycleId, uint8 correctCount, uint256 finalScore);
     event CycleResolved(uint256 indexed cycleId, uint256 prizePool);
+    event CycleEnded(uint256 indexed cycleId, uint256 endTime, uint32 totalSlips);
     event PrizeClaimed(uint256 indexed cycleId, address indexed player, uint256 rank, uint256 amount);
     event PrizeRollover(uint256 indexed fromCycleId, uint256 indexed toCycleId, uint256 amount);
     event UserStatsUpdated(address indexed user, uint256 totalSlips, uint256 totalWins, uint256 bestScore, uint256 winRate);
     event OddysseyReputationUpdated(address indexed user, uint256 pointsEarned, uint256 correctPredictions, uint256 totalReputation);
+    event LeaderboardUpdated(uint256 indexed cycleId, address indexed player, uint256 indexed slipId, uint8 rank, uint256 finalScore);
+    event AnalyticsUpdated(uint256 indexed cycleId, uint256 totalVolume, uint32 totalSlips, uint256 averageScore);
 
     // --- Errors ---
 
@@ -323,7 +327,7 @@ contract Oddyssey is Ownable, ReentrancyGuard {
 
     constructor(address _devWallet, uint256 _initialEntryFee) Ownable(msg.sender) {
         if (_devWallet == address(0)) revert InvalidDevWallet();
-        if (_initialEntryFee != 0.5 ether) revert InvalidFee(); // Must be exactly 0.5 STT
+        if (_initialEntryFee != 0.5 ether) revert InvalidFee(); // Must be exactly 0.5 MON
         
         devWallet = _devWallet;
         entryFee = _initialEntryFee;
@@ -343,7 +347,7 @@ contract Oddyssey is Ownable, ReentrancyGuard {
     }
 
     function setEntryFee(uint256 _newFee) external onlyOwner {
-        if (_newFee != 0.5 ether) revert InvalidFee(); // Must be exactly 0.5 STT
+        if (_newFee != 0.5 ether) revert InvalidFee(); // Must be exactly 0.5 MON
         if (_newFee == entryFee) revert InvalidFee();
         entryFee = _newFee;
         emit EntryFeeSet(_newFee);
@@ -417,12 +421,18 @@ contract Oddyssey is Ownable, ReentrancyGuard {
         if (cycle.state == CycleState.Resolved) revert CycleAlreadyResolved();
         if (block.timestamp <= cycle.endTime) revert BettingNotClosed();
 
+        // First mark cycle as ended if not already
+        if (cycle.state == CycleState.Active) {
+            cycle.state = CycleState.Ended;
+            emit CycleEnded(_cycleId, cycle.endTime, cycle.slipCount);
+        }
+
         // Update match results
         for (uint i = 0; i < MATCH_COUNT; i++) {
             dailyMatches[_cycleId][i].result = _results[i];
         }
 
-        // Update cycle state
+        // Update cycle state to resolved
         cycle.state = CycleState.Resolved;
         isCycleResolved[_cycleId] = true;
         
@@ -433,7 +443,18 @@ contract Oddyssey is Ownable, ReentrancyGuard {
             claimableStartTimes[_cycleId] = block.timestamp + 24 hours;
         }
 
+        // Emit analytics event
+        uint256 averageScore = 0;
+        if (cycle.slipCount > 0) {
+            // Calculate average score from evaluated slips
+            uint256 totalScore = 0;
+            uint32 evaluatedCount = 0;
+            // This would need to be calculated from actual slip data
+            // For now, we'll emit with basic stats
+        }
+
         emit CycleResolved(_cycleId, dailyPrizePools[_cycleId]);
+        emit AnalyticsUpdated(_cycleId, cycle.prizePool, cycle.slipCount, averageScore);
     }
 
     /**
@@ -533,7 +554,7 @@ contract Oddyssey is Ownable, ReentrancyGuard {
         if (slip.isEvaluated) revert SlipAlreadyEvaluated();
         
         uint8 correctCount = 0;
-        uint256 score = ODDS_SCALING_FACTOR;
+        uint256 score = ODDS_SCALING_FACTOR; // Start with 1000 (scaled by 1000)
         Match[MATCH_COUNT] storage currentMatches = dailyMatches[cycleIdOfSlip];
 
         for(uint i = 0; i < MATCH_COUNT; i++) {
@@ -556,14 +577,19 @@ contract Oddyssey is Ownable, ReentrancyGuard {
 
             if (isCorrect) {
                 correctCount++;
-                // Use the odd stored at the time of placing the bet for score calculation
+                // FIXED: Only multiply odds for correct predictions
+                // Example: 5 correct predictions with 2.0 odds each = 2*2*2*2*2 = 32
                 score = (score * p.selectedOdd) / ODDS_SCALING_FACTOR;
             }
+            // FIXED: Do NOT multiply score for incorrect predictions
         }
 
         slip.correctCount = correctCount;
         slip.isEvaluated = true;
         slip.finalScore = (correctCount > 0) ? score : 0;
+
+        // Emit slip evaluation event
+        emit SlipEvaluated(_slipId, slip.player, cycleIdOfSlip, correctCount, slip.finalScore);
 
         _updateLeaderboard(cycleIdOfSlip, slip.player, _slipId, slip.finalScore, correctCount);
         
@@ -613,7 +639,7 @@ contract Oddyssey is Ownable, ReentrancyGuard {
         uint256 devFee = (prizeAmount * DEV_FEE_PERCENTAGE) / 10000;
         uint256 userShare = prizeAmount - devFee;
         
-        // Transfer native STT
+        // Transfer native MON
         (bool success1, ) = payable(devWallet).call{value: devFee}("");
         if (!success1) revert TransferFailed();
         
@@ -664,6 +690,15 @@ contract Oddyssey is Ownable, ReentrancyGuard {
             userStat.bestStreak,
             userStat.lastActiveCycle
         );
+    }
+
+    /**
+     * @notice Get total number of slips placed by a user (for faucet eligibility)
+     * @param _user User address
+     * @return totalSlips Total number of slips placed across all cycles
+     */
+    function getUserTotalSlips(address _user) external view returns (uint256) {
+        return userStats[_user].totalSlips;
     }
 
     // --- Enhanced View Functions for Frontend Integration ---
@@ -764,10 +799,40 @@ contract Oddyssey is Ownable, ReentrancyGuard {
         LeaderboardEntry[DAILY_LEADERBOARD_SIZE] storage leaderboard = dailyLeaderboards[_cycleId];
         int256 position = -1;
 
+        // Get slip placement time for tiebreaker
+        Slip storage currentSlip = slips[_slipId];
+        uint256 currentPlacedAt = currentSlip.placedAt;
+
         for (uint256 i = DAILY_LEADERBOARD_SIZE; i > 0; i--) {
             uint256 index = i - 1;
             LeaderboardEntry storage entry = leaderboard[index];
-            if (_finalScore > entry.finalScore || (_finalScore == entry.finalScore && _correctCount > entry.correctCount)) {
+            
+            bool shouldReplace = false;
+            
+            if (_finalScore > entry.finalScore) {
+                // Higher score wins
+                shouldReplace = true;
+            } else if (_finalScore == entry.finalScore) {
+                // Same score - check tiebreakers
+                if (_correctCount > entry.correctCount) {
+                    // Tiebreaker 1: More correct predictions wins
+                    shouldReplace = true;
+                } else if (_correctCount == entry.correctCount) {
+                    // Tiebreaker 2: Earlier submission time wins
+                    if (entry.player == address(0)) {
+                        // Empty slot
+                        shouldReplace = true;
+                    } else {
+                        // Compare submission times - need to get the existing slip's placement time
+                        Slip storage existingSlip = slips[entry.slipId];
+                        if (currentPlacedAt < existingSlip.placedAt) {
+                            shouldReplace = true;
+                        }
+                    }
+                }
+            }
+            
+            if (shouldReplace) {
                 position = int256(index);
             } else {
                 break;
@@ -782,6 +847,9 @@ contract Oddyssey is Ownable, ReentrancyGuard {
             
             // Mark cycle as having winners
             cycleInfo[_cycleId].hasWinner = true;
+            
+            // Emit leaderboard update event
+            emit LeaderboardUpdated(_cycleId, _player, _slipId, uint8(uint256(position)), _finalScore);
         }
     }
 
@@ -905,10 +973,89 @@ contract Oddyssey is Ownable, ReentrancyGuard {
     
     // --- View Functions for External Integration ---
     
-    // Removed duplicate getCycleStatus function
-    
     function getCurrentCycle() external view returns (uint256) {
         return dailyCycleId;
+    }
+    
+    /**
+     * @dev Get comprehensive cycle analytics
+     */
+    function getCycleAnalytics(uint256 _cycleId) external view returns (
+        uint256 totalVolume,
+        uint32 totalSlips,
+        uint32 evaluatedSlips,
+        uint256 averageScore,
+        uint256 highestScore,
+        uint8 winnersCount,
+        bool hasRollover
+    ) {
+        if (_cycleId == 0 || _cycleId > dailyCycleId) {
+            return (0, 0, 0, 0, 0, 0, false);
+        }
+        
+        CycleInfo memory cycle = cycleInfo[_cycleId];
+        CycleStats memory cycleStatsData = cycleStats[_cycleId];
+        LeaderboardEntry[DAILY_LEADERBOARD_SIZE] memory leaderboard = dailyLeaderboards[_cycleId];
+        
+        // Count actual winners (non-zero entries)
+        uint8 winners = 0;
+        uint256 highest = 0;
+        for (uint8 i = 0; i < DAILY_LEADERBOARD_SIZE; i++) {
+            if (leaderboard[i].player != address(0)) {
+                winners++;
+                if (leaderboard[i].finalScore > highest) {
+                    highest = leaderboard[i].finalScore;
+                }
+            }
+        }
+        
+        return (
+            cycleStatsData.volume,
+            cycleStatsData.slips,
+            cycleStatsData.evaluatedSlips,
+            0, // Average score would need to be calculated from all slips
+            highest,
+            winners,
+            !cycle.hasWinner && cycle.prizePool > 0
+        );
+    }
+    
+    /**
+     * @dev Get prize pool breakdown for a cycle
+     */
+    function getPrizePoolBreakdown(uint256 _cycleId) external view returns (
+        uint256 totalPool,
+        uint256 firstPlace,
+        uint256 secondPlace,
+        uint256 thirdPlace,
+        uint256 fourthPlace,
+        uint256 fifthPlace,
+        uint256 devFee,
+        bool hasRollover
+    ) {
+        uint256 pool = dailyPrizePools[_cycleId];
+        if (pool == 0) {
+            return (0, 0, 0, 0, 0, 0, 0, false);
+        }
+        
+        CycleInfo memory cycle = cycleInfo[_cycleId];
+        bool rollover = !cycle.hasWinner;
+        
+        if (rollover) {
+            uint256 fee = (pool * PRIZE_ROLLOVER_FEE_PERCENTAGE) / 10000;
+            return (pool, 0, 0, 0, 0, 0, fee, true);
+        }
+        
+        return (
+            pool,
+            _calculatePrize(0, pool),
+            _calculatePrize(1, pool),
+            _calculatePrize(2, pool),
+            _calculatePrize(3, pool),
+            _calculatePrize(4, pool),
+            0,
+            false
+        );
     }
     
     function isCycleInitialized(uint256 _cycleId) external view returns (bool) {

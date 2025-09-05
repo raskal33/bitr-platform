@@ -12,7 +12,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "https://bitredict-backend.fly.dev/api/$1"
+      "dest": "https://bitr-backend.fly.dev/api/$1"
     },
     {
       "src": "/(.*)",
@@ -20,6 +20,6 @@
     }
   ],
   "env": {
-    "NEXT_PUBLIC_API_URL": "https://bitredict-backend.fly.dev"
+    "NEXT_PUBLIC_API_URL": "https://bitr-backend.fly.dev"
   }
 }

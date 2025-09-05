@@ -1,11 +1,11 @@
-# 🎯 Bitredict - Decentralized Prediction Markets
+# 🎯 Bitr - Decentralized Prediction Markets
 
-**Bitredict** is a next-generation decentralized prediction market platform built on the high-performance Somnia EVM network. We combine guided and open prediction markets with gamified daily contests and a sophisticated reputation system.
+**Bitr** is a next-generation decentralized prediction market platform built on the high-performance Monad Testnet. We combine guided and open prediction markets with gamified daily contests and a sophisticated reputation system.
 
 ## 🏗️ Project Structure
 
 ```
-bitredict/
+bitr/
 ├── backend/          # API server, oracle bot, and indexer services
 ├── solidity/         # Smart contracts and deployment scripts  
 ├── docs/             # Documentation site (Docusaurus)
@@ -41,10 +41,10 @@ npm start  # Local dev server at localhost:3000
 Comprehensive documentation is available at our **Docusaurus site**:
 
 - **Local Development**: Run `cd docs && npm start`
-- **Production**: [docs.bitredict.io](https://docs.bitredict.io) *(coming soon)*
+- **Production**: [docs.bitr.io](https://docs.bitr.io) *(coming soon)*
 
 ### Documentation Covers:
-- 🎯 **Platform Overview** - What is Bitredict and why it matters
+- 🎯 **Platform Overview** - What is Bitr and why it matters
 - 🏗️ **Architecture** - Technical system overview  
 - 📊 **Prediction Markets** - Guided vs Open markets
 - 🎮 **Oddyssey Game** - Daily parlay contest mechanics
@@ -78,7 +78,7 @@ Comprehensive documentation is available at our **Docusaurus site**:
 
 ## 🛠️ Technology Stack
 
-- **Blockchain**: Somnia EVM (400,000+ TPS, sub-second finality)
+- **Blockchain**: Monad Testnet (high-performance EVM)
 - **Smart Contracts**: Solidity ^0.8.20
 - **Backend**: Node.js with Express API
 - **Database**: Neon.tech PostgreSQL (4-schema architecture)
@@ -102,7 +102,7 @@ Comprehensive documentation is available at our **Docusaurus site**:
 
 ## 💰 Tokenomics
 
-**BITR Token (ERC-20 on Somnia)**
+**BITR Token (ERC-20 on Monad)**
 - **Total Supply**: 100,000,000 BITR (fixed, no inflation)
 - **Distribution**: 40% community rewards, 20% team, 15% development
 - **Utility**: Fee discounts, staking rewards, governance, premium access
@@ -127,10 +127,10 @@ Comprehensive documentation is available at our **Docusaurus site**:
 ## 📞 Support & Community
 
 - **Documentation**: [/docs](./docs) folder (Docusaurus site)
-- **GitHub Issues**: [Issues](https://github.com/bitredict/bitredict/issues)
-- **Discord**: [discord.gg/bitredict](https://discord.gg/bitredict)
-- **Twitter**: [@bitredict](https://twitter.com/bitredict)
+- **GitHub Issues**: [Issues](https://github.com/bitr/bitr/issues)
+- **Discord**: [discord.gg/bitr](https://discord.gg/bitr)
+- **Twitter**: [@bitr](https://twitter.com/bitr)
 
 ---
 
-*Built with ❤️ on Somnia - The future of prediction markets is here.* 
+*Built with ❤️ on Monad - The future of prediction markets is here.* 

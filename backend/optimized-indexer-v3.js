@@ -3,31 +3,30 @@ const config = require('./config');
 const RpcManager = require('./utils/rpc-manager');
 
 /**
- * Optimized Indexer V3 - Based on EVM Indexing Best Practices
+ * Optimized Indexer V3 - Monad Testnet Optimized
  * 
  * Key Features:
- * - Realistic batch sizes (100-500 blocks based on network capacity)
- * - Multiple RPC endpoints with failover
+ * - Monad-optimized batch sizes (100-250 blocks for 400ms block times)
+ * - Multiple Monad RPC endpoints with failover
  * - Proper event filtering and storage
  * - State management and checkpointing
  * - Error recovery and monitoring
  * - Memory-efficient processing
+ * - Optimized for 10,000 TPS and 800ms finality
  */
 
 class OptimizedIndexerV3 {
   constructor() {
-    // Initialize RPC Manager with correct Somnia endpoints
+    // Initialize RPC Manager with Monad Testnet endpoints (main + fallback)
     this.rpcManager = new RpcManager([
-      'https://dream-rpc.somnia.network/',
-      'https://rpc.ankr.com/somnia_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205',
-      'https://somnia-testnet.rpc.thirdweb.com',
-      'https://testnet-rpc.somnia.network'
+      'https://testnet-rpc.monad.xyz/', // Main RPC
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/' // Fallback RPC
     ], {
-      maxRetries: 8,
-      baseDelay: 1000,
-      maxDelay: 30000,
-      circuitBreakerThreshold: 5,
-      circuitBreakerTimeout: 60000
+      maxRetries: 5, // Reduced for Monad's fast finality
+      baseDelay: 500, // Faster retry for 400ms blocks
+      maxDelay: 10000, // Reduced max delay
+      circuitBreakerThreshold: 3, // Lower threshold for fast recovery
+      circuitBreakerTimeout: 30000 // Shorter timeout for Monad
     });
     
     this.isRunning = false;
@@ -35,11 +34,11 @@ class OptimizedIndexerV3 {
     this.consecutiveErrors = 0;
     this.maxConsecutiveErrors = 15;
     
-    // Realistic batch processing settings based on EVM best practices
-    this.batchSize = 200; // Conservative batch size for stability
-    this.maxBatchSize = 500; // Maximum for catch-up scenarios
-    this.processingDelay = 200; // 200ms between batches
-    this.maxParallelQueries = 3; // Limit concurrent RPC calls
+    // Monad-optimized batch processing settings (400ms blocks, 10k TPS)
+    this.batchSize = 100; // Smaller batches for 400ms blocks
+    this.maxBatchSize = 250; // Reduced max for Monad's fast finality
+    this.processingDelay = 100; // 100ms between batches (faster than block time)
+    this.maxParallelQueries = 5; // Higher concurrency for Monad's throughput
     
     // State management
     this.state = {
@@ -122,7 +121,7 @@ class OptimizedIndexerV3 {
   async initializeContracts() {
     // Correct ABIs based on actual smart contracts
     const poolABI = [
-      "event PoolCreated(uint256 indexed poolId, address indexed creator, uint256 eventStartTime, uint256 eventEndTime, uint8 oracleType, bytes32 marketId)",
+      "event PoolCreated(uint256 indexed poolId, address indexed creator, uint256 eventStartTime, uint256 eventEndTime, uint8 oracleType, bytes32 marketId, uint8 marketType, string league, string category)",
       "event BetPlaced(uint256 indexed poolId, address indexed bettor, uint256 amount, bool isForOutcome)",
       "event LiquidityAdded(uint256 indexed poolId, address indexed provider, uint256 amount)",
       "event PoolSettled(uint256 indexed poolId, bytes32 result, bool creatorSideWon, uint256 timestamp)",
@@ -134,7 +133,11 @@ class OptimizedIndexerV3 {
       "event ComboPoolCreated(uint256 indexed comboPoolId, address indexed creator, uint256 conditionCount, uint16 totalOdds)",
       "event ComboBetPlaced(uint256 indexed comboPoolId, address indexed bettor, uint256 amount)",
       "event ComboPoolSettled(uint256 indexed comboPoolId, bool creatorSideWon, uint256 timestamp)",
-      "event ReputationActionOccurred(address indexed user, uint8 action, uint256 value, bytes32 indexed poolId, uint256 timestamp)"
+      "event ReputationActionOccurred(address indexed user, uint8 action, uint256 value, bytes32 indexed poolId, uint256 timestamp)",
+      "event PoolFilledAboveThreshold(uint256 indexed poolId, uint256 fillPercentage, uint256 timestamp)",
+      "event UserBetPlaced(uint256 indexed poolId, address indexed user, uint256 amount, uint256 totalUserBets)",
+      "event UserLiquidityAdded(uint256 indexed poolId, address indexed user, uint256 amount, uint256 totalUserLiquidity)",
+      "event PoolVolumeUpdated(uint256 indexed poolId, uint256 totalVolume, uint256 participantCount)"
     ];
     
     const oracleABI = [
@@ -144,11 +147,15 @@ class OptimizedIndexerV3 {
     const oddysseyABI = [
       "event CycleStarted(uint256 indexed cycleId, uint256 endTime)",
       "event SlipPlaced(uint256 indexed cycleId, address indexed player, uint256 indexed slipId)",
+      "event SlipEvaluated(uint256 indexed slipId, address indexed player, uint256 indexed cycleId, uint8 correctCount, uint256 finalScore)",
       "event CycleResolved(uint256 indexed cycleId, uint256 prizePool)",
+      "event CycleEnded(uint256 indexed cycleId, uint256 endTime, uint32 totalSlips)",
       "event PrizeClaimed(uint256 indexed cycleId, address indexed player, uint256 rank, uint256 amount)",
       "event PrizeRollover(uint256 indexed fromCycleId, uint256 indexed toCycleId, uint256 amount)",
       "event UserStatsUpdated(address indexed user, uint256 totalSlips, uint256 totalWins, uint256 bestScore, uint256 winRate)",
-      "event OddysseyReputationUpdated(address indexed user, uint256 pointsEarned, uint256 correctPredictions, uint256 totalReputation)"
+      "event OddysseyReputationUpdated(address indexed user, uint256 pointsEarned, uint256 correctPredictions, uint256 totalReputation)",
+      "event LeaderboardUpdated(uint256 indexed cycleId, address indexed player, uint256 indexed slipId, uint8 rank, uint256 finalScore)",
+      "event AnalyticsUpdated(uint256 indexed cycleId, uint256 totalVolume, uint32 totalSlips, uint256 averageScore)"
     ];
     
     const reputationABI = [
@@ -286,7 +293,7 @@ class OptimizedIndexerV3 {
     while (this.isRunning) {
       try {
         if (this.isProcessing) {
-          await this.sleep(1000);
+          await this.sleep(200); // Reduced from 1000ms for Monad's fast blocks
           continue;
         }
         
@@ -528,6 +535,55 @@ class OptimizedIndexerV3 {
         totalEvents++;
       }
       
+      // New enhanced events for stats tracking
+      const poolFilledEvents = await this.queryEventsWithRetry(
+        this.poolContract,
+        this.poolContract.filters.PoolFilledAboveThreshold(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of poolFilledEvents) {
+        await this.handlePoolFilledAboveThreshold(event);
+        totalEvents++;
+      }
+      
+      const userBetEvents = await this.queryEventsWithRetry(
+        this.poolContract,
+        this.poolContract.filters.UserBetPlaced(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of userBetEvents) {
+        await this.handleUserBetPlaced(event);
+        totalEvents++;
+      }
+      
+      const userLiquidityEvents = await this.queryEventsWithRetry(
+        this.poolContract,
+        this.poolContract.filters.UserLiquidityAdded(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of userLiquidityEvents) {
+        await this.handleUserLiquidityAdded(event);
+        totalEvents++;
+      }
+      
+      const poolVolumeEvents = await this.queryEventsWithRetry(
+        this.poolContract,
+        this.poolContract.filters.PoolVolumeUpdated(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of poolVolumeEvents) {
+        await this.handlePoolVolumeUpdated(event);
+        totalEvents++;
+      }
+      
       console.log(`✅ Processed ${totalEvents} pool events`);
       this.state.totalEvents += totalEvents;
       
@@ -628,6 +684,58 @@ class OptimizedIndexerV3 {
         await this.handlePrizeClaimed(event);
         totalEvents++;
       }
+
+      // SlipEvaluated events
+      const slipEvaluatedEvents = await this.queryEventsWithRetry(
+        this.oddysseyContract,
+        this.oddysseyContract.filters.SlipEvaluated(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of slipEvaluatedEvents) {
+        await this.handleSlipEvaluated(event);
+        totalEvents++;
+      }
+
+      // CycleEnded events
+      const cycleEndedEvents = await this.queryEventsWithRetry(
+        this.oddysseyContract,
+        this.oddysseyContract.filters.CycleEnded(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of cycleEndedEvents) {
+        await this.handleCycleEnded(event);
+        totalEvents++;
+      }
+
+      // LeaderboardUpdated events
+      const leaderboardEvents = await this.queryEventsWithRetry(
+        this.oddysseyContract,
+        this.oddysseyContract.filters.LeaderboardUpdated(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of leaderboardEvents) {
+        await this.handleLeaderboardUpdated(event);
+        totalEvents++;
+      }
+
+      // OddysseyReputationUpdated events
+      const reputationEvents = await this.queryEventsWithRetry(
+        this.oddysseyContract,
+        this.oddysseyContract.filters.OddysseyReputationUpdated(),
+        fromBlock,
+        toBlock
+      );
+      
+      for (const event of reputationEvents) {
+        await this.handleOddysseyReputationUpdated(event);
+        totalEvents++;
+      }
       
       console.log(`✅ Processed ${totalEvents} Oddyssey events`);
       this.state.totalEvents += totalEvents;
@@ -712,7 +820,7 @@ class OptimizedIndexerV3 {
       const TitleTemplatesService = require('./services/title-templates.js');
       const titleService = new TitleTemplatesService();
       
-      const { poolId, creator, eventStartTime, eventEndTime, oracleType, marketId } = event.args;
+      const { poolId, creator, eventStartTime, eventEndTime, oracleType, marketId, marketType, league, category } = event.args;
       
       // FIXED: Fetch complete pool data from blockchain instead of using defaults
       console.log(`🔍 Fetching complete pool data from blockchain for pool ${poolId}...`);
@@ -1053,6 +1161,118 @@ class OptimizedIndexerV3 {
     }
   }
 
+  async handleSlipEvaluated(event) {
+    try {
+      const { slipId, player, cycleId, correctCount, finalScore } = event.args;
+      console.log(`✅ Processing SlipEvaluated: Slip ${slipId}, Player ${player}, Correct: ${correctCount}, Score: ${finalScore}`);
+      
+      // Store the event
+      await this.storeEvent(event, 'SlipEvaluated');
+      
+      // Update slip evaluation in database
+      await this.db.query(`
+        UPDATE oracle.oddyssey_slips 
+        SET 
+          correct_count = $1,
+          final_score = $2,
+          is_evaluated = true,
+          evaluated_at = NOW()
+        WHERE slip_id = $3
+      `, [correctCount.toString(), finalScore.toString(), slipId.toString()]);
+      
+    } catch (error) {
+      console.error('❌ Error handling SlipEvaluated:', error);
+      throw error;
+    }
+  }
+
+  async handleCycleEnded(event) {
+    try {
+      const { cycleId, endTime, totalSlips } = event.args;
+      console.log(`✅ Processing CycleEnded: Cycle ${cycleId}, End Time ${endTime}, Total Slips: ${totalSlips}`);
+      
+      // Store the event
+      await this.storeEvent(event, 'CycleEnded');
+      
+      // Update cycle status
+      await this.db.query(`
+        UPDATE oracle.oddyssey_cycles 
+        SET 
+          state = 'Ended',
+          total_slips = $1,
+          ended_at = to_timestamp($2)
+        WHERE cycle_id = $3
+      `, [totalSlips.toString(), endTime.toString(), cycleId.toString()]);
+      
+    } catch (error) {
+      console.error('❌ Error handling CycleEnded:', error);
+      throw error;
+    }
+  }
+
+  async handleLeaderboardUpdated(event) {
+    try {
+      const { cycleId, player, slipId, rank, finalScore } = event.args;
+      console.log(`✅ Processing LeaderboardUpdated: Cycle ${cycleId}, Player ${player}, Rank ${rank}`);
+      
+      // Store the event
+      await this.storeEvent(event, 'LeaderboardUpdated');
+      
+      // Update leaderboard entry
+      await this.db.query(`
+        INSERT INTO oracle.oddyssey_leaderboard (
+          cycle_id, player_address, slip_id, rank, final_score, created_at
+        ) VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (cycle_id, rank) 
+        DO UPDATE SET 
+          player_address = EXCLUDED.player_address,
+          slip_id = EXCLUDED.slip_id,
+          final_score = EXCLUDED.final_score
+      `, [cycleId.toString(), player, slipId.toString(), rank.toString(), finalScore.toString()]);
+      
+    } catch (error) {
+      console.error('❌ Error handling LeaderboardUpdated:', error);
+      throw error;
+    }
+  }
+
+  async handleOddysseyReputationUpdated(event) {
+    try {
+      const { user, pointsEarned, correctPredictions, totalReputation } = event.args;
+      console.log(`✅ Processing OddysseyReputationUpdated: User ${user}, Points: ${pointsEarned}, Total: ${totalReputation}`);
+      
+      // Store the event
+      await this.storeEvent(event, 'OddysseyReputationUpdated');
+      
+      // Insert reputation action
+      await this.db.query(`
+        INSERT INTO core.reputation_actions (
+          user_address, action_type, reputation_delta, associated_value,
+          timestamp, block_number, transaction_hash, created_at
+        ) VALUES ($1, $2, $3, $4, to_timestamp($5), $6, $7, NOW())
+      `, [
+        user,
+        'ODDYSSEY_PERFORMANCE',
+        pointsEarned.toString(),
+        `${correctPredictions} correct predictions`,
+        event.blockNumber ? (await this.provider.getBlock(event.blockNumber)).timestamp : Math.floor(Date.now() / 1000),
+        event.blockNumber || 0,
+        event.transactionHash || ''
+      ]);
+      
+      // Update user's total reputation
+      await this.db.query(`
+        UPDATE core.users 
+        SET reputation = reputation + $1
+        WHERE address = $2
+      `, [pointsEarned.toString(), user]);
+      
+    } catch (error) {
+      console.error('❌ Error handling OddysseyReputationUpdated:', error);
+      throw error;
+    }
+  }
+
   async handlePrizeClaimed(event) {
     try {
       const { cycleId, player, rank, amount } = event.args;
@@ -1077,6 +1297,105 @@ class OptimizedIndexerV3 {
       
     } catch (error) {
       console.error('❌ Error handling ReputationUpdated:', error);
+      throw error;
+    }
+  }
+
+  // New enhanced event handlers for stats tracking
+  async handlePoolFilledAboveThreshold(event) {
+    try {
+      const { poolId, fillPercentage, timestamp } = event.args;
+      console.log(`✅ Processing PoolFilledAboveThreshold: Pool ${poolId}, Fill ${fillPercentage}%`);
+      
+      const db = require('./db/db');
+      
+      // Update pool stats
+      await db.query(`
+        UPDATE oracle.pools 
+        SET fill_percentage = $1, filled_above_threshold = true, updated_at = NOW()
+        WHERE pool_id = $2
+      `, [fillPercentage.toString(), poolId.toString()]);
+      
+      // Store event
+      await this.storeEvent(event, 'PoolFilledAboveThreshold');
+      
+    } catch (error) {
+      console.error('❌ Error handling PoolFilledAboveThreshold:', error);
+      throw error;
+    }
+  }
+
+  async handleUserBetPlaced(event) {
+    try {
+      const { poolId, user, amount, totalUserBets } = event.args;
+      console.log(`✅ Processing UserBetPlaced: Pool ${poolId}, User ${user}, Amount ${ethers.formatEther(amount)}`);
+      
+      const db = require('./db/db');
+      
+      // Update user stats
+      await db.query(`
+        INSERT INTO oracle.user_stats (user_address, total_bets, total_bet_amount, last_activity)
+        VALUES ($1, 1, $2, NOW())
+        ON CONFLICT (user_address) DO UPDATE SET
+          total_bets = oracle.user_stats.total_bets + 1,
+          total_bet_amount = oracle.user_stats.total_bet_amount + $2,
+          last_activity = NOW()
+      `, [user, amount.toString()]);
+      
+      // Store event
+      await this.storeEvent(event, 'UserBetPlaced');
+      
+    } catch (error) {
+      console.error('❌ Error handling UserBetPlaced:', error);
+      throw error;
+    }
+  }
+
+  async handleUserLiquidityAdded(event) {
+    try {
+      const { poolId, user, amount, totalUserLiquidity } = event.args;
+      console.log(`✅ Processing UserLiquidityAdded: Pool ${poolId}, User ${user}, Amount ${ethers.formatEther(amount)}`);
+      
+      const db = require('./db/db');
+      
+      // Update user stats
+      await db.query(`
+        INSERT INTO oracle.user_stats (user_address, total_liquidity, total_liquidity_amount, last_activity)
+        VALUES ($1, 1, $2, NOW())
+        ON CONFLICT (user_address) DO UPDATE SET
+          total_liquidity = oracle.user_stats.total_liquidity + 1,
+          total_liquidity_amount = oracle.user_stats.total_liquidity_amount + $2,
+          last_activity = NOW()
+      `, [user, amount.toString()]);
+      
+      // Store event
+      await this.storeEvent(event, 'UserLiquidityAdded');
+      
+    } catch (error) {
+      console.error('❌ Error handling UserLiquidityAdded:', error);
+      throw error;
+    }
+  }
+
+  async handlePoolVolumeUpdated(event) {
+    try {
+      const { poolId, totalVolume, participantCount } = event.args;
+      console.log(`✅ Processing PoolVolumeUpdated: Pool ${poolId}, Volume ${ethers.formatEther(totalVolume)}, Participants ${participantCount}`);
+      
+      const db = require('./db/db');
+      
+      // Update pool volume stats
+      await db.query(`
+        UPDATE oracle.pools 
+        SET total_volume = $1, participant_count = $2, updated_at = NOW()
+        WHERE pool_id = $2
+      `, [totalVolume.toString(), participantCount.toString(), poolId.toString()]);
+      
+      // Store event
+      await this.storeEvent(event, 'PoolVolumeUpdated');
+      
+    } catch (error) {
+      console.error('❌ Error handling PoolVolumeUpdated:', error);
       throw error;
     }
   }
@@ -1106,6 +1425,7 @@ class OptimizedIndexerV3 {
   }
 
   async healthMonitor() {
+    // Monad-optimized health monitoring (more frequent for fast blocks)
     setInterval(() => {
       const uptime = Date.now() - this.state.startTime;
       const uptimeHours = (uptime / (1000 * 60 * 60)).toFixed(2);
@@ -1120,15 +1440,15 @@ class OptimizedIndexerV3 {
       console.log(`⚡ Blocks per second: ${this.performanceStats.blocksPerSecond.toFixed(2)}`);
       console.log(`📈 Average batch time: ${this.performanceStats.averageBatchTime.toFixed(0)}ms`);
       
-      // Check for lag
+      // Check for lag (adjusted for Monad's fast blocks)
       this.rpcManager.getBlockNumber().then(currentBlock => {
         const lag = currentBlock - this.state.lastIndexedBlock;
-        if (lag > 1000) {
+        if (lag > 500) { // Reduced threshold for Monad's 400ms blocks
           console.warn(`⚠️ Indexer lag detected: ${lag} blocks behind`);
         }
       });
       
-    }, 60000); // Log every minute
+    }, 30000); // Log every 30 seconds (more frequent for Monad)
   }
 
   async sleep(ms) {

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @title GuidedOracle
+ * @notice Provides verified sports and market outcomes for Monad Testnet
+ * @dev Optimized for Monad's 400ms blocks and high throughput
+ */
 contract GuidedOracle {
     // Outcome structure for football/coin markets
     struct Outcome {

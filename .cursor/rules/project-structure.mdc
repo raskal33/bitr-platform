@@ -8,7 +8,7 @@ This is a decentralized prediction market platform with the following structure:
 - Frontend is in a separate directory: `/home/leon/predict-linux`
 
 Rule 2: Key Technologies
-- Blockchain: Somnia EVM network
+- Blockchain: Monad Testnet
 - Backend: Node.js with Express, PostgreSQL (Neon.tech), Redis
 - Smart Contracts: Solidity ^0.8.20 with Hardhat
 - Frontend: React/Next.js (separate directory)
