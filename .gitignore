@@ -71,6 +71,21 @@ temp/
 
 # Cache
 .cache/
+*/.cache/
+
+# Large files
+*.json.raw
+*-raw.json
+fixtures-*-raw.json
+
+# Webpack cache
+.cache/
+*/node_modules/.cache/
+
+# Analysis files
+*-analysis/
+sportmonks-analysis/
+sportmonks-comprehensive-analysis/
 
 # Hardhat
 cache/
