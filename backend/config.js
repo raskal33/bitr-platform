@@ -16,8 +16,24 @@ module.exports = {
   blockchain: {
     rpcUrl: process.env.RPC_URL || 'https://testnet-rpc.monad.xyz/',
     fallbackRpcUrl: process.env.FALLBACK_RPC_URL || 'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/',
+    // Multi-RPC configuration for load balancing
+    rpcUrls: [
+      'https://testnet-rpc.monad.xyz/',                    // Monad official (25 req/sec)
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/', // QuickNode (15 req/sec)
+      'https://rpc.ankr.com/monad_testnet'                 // Ankr (30 req/sec) - BEST!
+    ],
+    // Free tier optimization
+    freeTierMode: process.env.FREE_TIER_MODE === 'true',
     chainId: process.env.CHAIN_ID || 10143,
     privateKey: process.env.PRIVATE_KEY,
+    startBlock: process.env.START_BLOCK || 0,
+    // Indexer settings
+    indexer: {
+      pollInterval: parseInt(process.env.POLL_INTERVAL) || 5000, // 5 seconds between polls
+      rpcDelay: parseInt(process.env.RPC_DELAY) || 100, // 100ms delay between RPC calls
+      batchSize: parseInt(process.env.BATCH_SIZE) || 1, // Process 1 block at a time
+      maxRetries: parseInt(process.env.MAX_RETRIES) || 3
+    },
     // Monad-specific settings
     monad: {
       baseFee: '50000000000', // 50 gwei base fee (hard-coded on testnet)
@@ -31,7 +47,7 @@ module.exports = {
       compatibility: 'Cancun', // EVM Cancun fork compatibility
     },
     contractAddresses: {
-      bitredictPool: process.env.BITREDICT_POOL_ADDRESS || '0x080dB155ded47b08D9807ad38Be550784D4Df1e6',
+      bitrPool: process.env.BITR_POOL_ADDRESS || '0x080dB155ded47b08D9807ad38Be550784D4Df1e6',
       guidedOracle: process.env.GUIDED_ORACLE_ADDRESS || '0x9CFB1097577480BD0eDe1795018c89786c541097',
       optimisticOracle: process.env.OPTIMISTIC_ORACLE_ADDRESS || '0x36fddb1844B89D4c0A00497A1C6B56B958bCcFB6',
       reputationSystem: process.env.REPUTATION_SYSTEM_ADDRESS || '0x86F7B172caFC2BaB08E6c93BD984fab0b08630e2',
@@ -45,10 +61,12 @@ module.exports = {
   // API configuration
   api: {
     port: process.env.PORT || 3000,
+    adminKey: process.env.ADMIN_KEY,
     cors: {
       origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [
         'https://bitredict.vercel.app',
         'https://bitredict.io',
+        'https://bitr-front-ap9z.vercel.app',
         'http://localhost:8080',
         'http://localhost:3000'
       ],
