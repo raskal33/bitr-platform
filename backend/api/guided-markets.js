@@ -197,7 +197,7 @@ router.post('/cryptocurrency', async (req, res) => {
     }
     
     // Use normalized timeframe for further processing
-    timeframe = finalTimeframe;
+    const processedTimeframe = finalTimeframe;
 
     // Validate odds format
     if (odds < 101 || odds > 10000) {
@@ -229,7 +229,7 @@ router.post('/cryptocurrency', async (req, res) => {
       cryptocurrency: cryptocurrency.symbol,
       targetPrice,
       direction,
-      timeframe,
+      timeframe: processedTimeframe,
       predictedOutcome,
       odds: odds / 100,
       creatorStake,
@@ -240,7 +240,7 @@ router.post('/cryptocurrency', async (req, res) => {
       cryptocurrency,
       targetPrice,
       direction,
-      timeframe,
+      timeframe: processedTimeframe,
       predictedOutcome,
       odds,
       creatorStake,
