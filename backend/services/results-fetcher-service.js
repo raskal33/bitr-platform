@@ -104,19 +104,25 @@ class ResultsFetcherService {
    */
   async getCompletedMatchesWithoutResults() {
     const query = `
-      SELECT f.id, f.home_team, f.away_team, f.match_date, f.status, f.result_info
+      SELECT f.id, f.home_team, f.away_team, f.starting_at, f.status, f.result_info
       FROM oracle.fixtures f
       WHERE (
         -- Option 1: Matches with finished status but no result_info
         (f.status IN ('FT', 'AET', 'PEN') AND (f.result_info IS NULL OR f.result_info = '{}' OR f.result_info = 'null'))
         OR
-        -- Option 2: Matches that should be finished based on time (fallback)
-        (f.match_date < NOW() - INTERVAL '3 hours' 
+        -- Option 2: Matches that should be finished based on time (fallback for NS status)
+        (f.starting_at < NOW() - INTERVAL '3 hours' 
          AND f.status = 'NS' 
          AND (f.result_info IS NULL OR f.result_info = '{}' OR f.result_info = 'null')
-         AND f.match_date > NOW() - INTERVAL '24 hours')  -- Only recent matches
+         AND f.starting_at > NOW() - INTERVAL '24 hours')  -- Only recent matches
+        OR
+        -- Option 3: Matches stuck in INPLAY status that should have finished (NEW)
+        (f.starting_at < NOW() - INTERVAL '3 hours' 
+         AND f.status LIKE 'INPLAY%' 
+         AND (f.result_info IS NULL OR f.result_info = '{}' OR f.result_info = 'null')
+         AND f.starting_at > NOW() - INTERVAL '48 hours')  -- Check up to 48 hours back for stuck matches
       )
-      ORDER BY f.match_date DESC
+      ORDER BY f.starting_at DESC
       LIMIT 50  -- Process in batches
     `;
     
