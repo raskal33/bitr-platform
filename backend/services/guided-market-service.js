@@ -457,11 +457,18 @@ class GuidedMarketService {
       '4h': 4 * 60 * 60,
       '1d': 24 * 60 * 60,
       '1w': 7 * 24 * 60 * 60,
-      '1m': 30 * 24 * 60 * 60
+      '1m': 30 * 24 * 60 * 60,
+      // Support long format timeframes
+      '1hour': 60 * 60,
+      '4hours': 4 * 60 * 60,
+      '1day': 24 * 60 * 60,
+      '1week': 7 * 24 * 60 * 60,
+      '1month': 30 * 24 * 60 * 60
     };
 
-    if (timeframes[timeframe]) {
-      return timeframes[timeframe];
+    const normalizedTimeframe = timeframe.toLowerCase();
+    if (timeframes[normalizedTimeframe]) {
+      return timeframes[normalizedTimeframe];
     }
 
     // Try to parse custom timeframe (e.g., "2h", "3d")
@@ -473,7 +480,7 @@ class GuidedMarketService {
       return value * multipliers[unit];
     }
 
-    throw new Error(`Invalid timeframe: ${timeframe}. Valid formats: 1h, 4h, 1d, 1w, 1m, or custom like 2h, 3d`);
+    throw new Error(`Invalid timeframe: ${timeframe}. Valid formats: 1h, 4h, 1d, 1w, 1m (or 1hour, 4hours, 1day, 1week, 1month), or custom like 2h, 3d`);
   }
 
   /**

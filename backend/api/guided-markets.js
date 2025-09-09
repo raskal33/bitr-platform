@@ -174,14 +174,30 @@ router.post('/cryptocurrency', async (req, res) => {
       });
     }
 
-    // Validate timeframe
-    const validTimeframes = ['1h', '4h', '1d', '1w', '1m'];
-    if (!validTimeframes.includes(timeframe)) {
+    // Validate timeframe - accept both short and long formats
+    const validTimeframes = ['1h', '4h', '1d', '1w', '1m', '1hour', '4hours', '1day', '1week', '1month'];
+    const normalizedTimeframe = timeframe.toLowerCase();
+    
+    // Normalize timeframe to short format for consistency
+    const timeframeMap = {
+      '1hour': '1h',
+      '4hours': '4h', 
+      '1day': '1d',
+      '1week': '1w',
+      '1month': '1m'
+    };
+    
+    const finalTimeframe = timeframeMap[normalizedTimeframe] || timeframe;
+    
+    if (!validTimeframes.includes(normalizedTimeframe) && !['1h', '4h', '1d', '1w', '1m'].includes(finalTimeframe)) {
       return res.status(400).json({
         success: false,
-        error: `Invalid timeframe. Must be one of: ${validTimeframes.join(', ')}`
+        error: `Invalid timeframe. Must be one of: 1h, 4h, 1d, 1w, 1m (or 1hour, 4hours, 1day, 1week, 1month)`
       });
     }
+    
+    // Use normalized timeframe for further processing
+    timeframe = finalTimeframe;
 
     // Validate odds format
     if (odds < 101 || odds > 10000) {
