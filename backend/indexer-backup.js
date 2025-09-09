@@ -4,22 +4,22 @@ const config = require('./config');
 const RpcManager = require('./utils/rpc-manager');
 
 // Try to load real deployed ABIs with multiple path attempts
-let BitredictPoolABI, GuidedOracleABI;
+let BitrPoolABI, GuidedOracleABI;
 
-// Try multiple possible paths for BitredictPool ABI (Docker container paths)
+// Try multiple possible paths for BitrPool ABI (Docker container paths)
 const poolPaths = [
-  './solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-  '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-  '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-  path.join(__dirname, './solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json'),
-  path.join(__dirname, '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json'),
-  path.join(__dirname, '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json')
+  './solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+  '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+  '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+  path.join(__dirname, './solidity/artifacts/contracts/BitrPool.sol/BitrPool.json'),
+  path.join(__dirname, '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json'),
+  path.join(__dirname, '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json')
 ];
 
-BitredictPoolABI = null;
+BitrPoolABI = null;
 for (const path of poolPaths) {
   try {
-    BitredictPoolABI = require(path).abi;
+    BitrPoolABI = require(path).abi;
     console.log(`✅ BitredictPool ABI loaded successfully from: ${path}`);
     break;
   } catch (error) {
@@ -27,9 +27,9 @@ for (const path of poolPaths) {
   }
 }
 
-if (!BitredictPoolABI) {
+if (!BitrPoolABI) {
   console.warn('⚠️ BitredictPool ABI not found in any path, using minimal ABI');
-  BitredictPoolABI = [
+  BitrPoolABI = [
     "event PoolCreated(uint256 indexed poolId, address indexed creator, uint256 eventStartTime, uint256 eventEndTime, uint8 oracleType, bytes32 indexed marketId)",
     "event BetPlaced(uint256 indexed poolId, address indexed bettor, uint256 amount, bool isForOutcome)",
     "event PoolSettled(uint256 indexed poolId, bytes32 result, bool creatorSideWon, uint256 timestamp)",
@@ -85,7 +85,7 @@ class EnhancedBitredictIndexer {
     this.maxConsecutiveErrors = 10;
     
     // Use real deployed ABIs instead of manual definitions
-    this.poolABI = BitredictPoolABI;
+    this.poolABI = BitrPoolABI;
     this.oracleABI = GuidedOracleABI;
     
     // Oddyssey contract ABI for events

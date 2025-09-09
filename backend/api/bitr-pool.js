@@ -1,16 +1,16 @@
 /**
- * BitredictPool API
+ * BitrPool API
  * 
  * API endpoints for prediction pool operations
  */
 
 const express = require('express');
 const router = express.Router();
-const BitredictPoolService = require('../services/bitredict-pool-service.js');
+const BitrPoolService = require('../services/bitr-pool-service.js');
 const db = require('../db/db.js');
 
 // Initialize service
-const poolService = new BitredictPoolService();
+const poolService = new BitrPoolService();
 
 /**
  * GET /api/bitredict-pool/pools

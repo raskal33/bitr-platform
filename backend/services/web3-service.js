@@ -38,7 +38,7 @@ class Web3Service {
     this.provider = null;
     this.wallet = null;
     this.oddysseyContract = null;
-    this.bitredictPoolContract = null;
+    this.bitrPoolContract = null;
     this.guidedOracleContract = null;
     this.optimisticOracleContract = null;
     this.bitrTokenContract = null;

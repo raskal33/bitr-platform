@@ -10,7 +10,7 @@ const db = require('../db/db.js');
 class BitrPoolService {
   constructor() {
     this.web3Service = null;
-    this.bitredictPoolContract = null;
+    this.bitrPoolContract = null;
   }
 
   /**
@@ -33,7 +33,7 @@ class BitrPoolService {
    */
   async createPool(poolData) {
     try {
-      if (!this.bitredictPoolContract) {
+      if (!this.bitrPoolContract) {
         await this.initialize();
       }
 
@@ -59,7 +59,7 @@ class BitrPoolService {
       }
 
       // Create pool on contract
-      const tx = await this.bitredictPoolContract.createPool(
+      const tx = await this.bitrPoolContract.createPool(
         predictedOutcome,
         odds,
         creatorStake,
@@ -99,11 +99,11 @@ class BitrPoolService {
    */
   async placeBet(poolId, amount, userAddress) {
     try {
-      if (!this.bitredictPoolContract) {
+      if (!this.bitrPoolContract) {
         await this.initialize();
       }
 
-      const tx = await this.bitredictPoolContract.placeBet(poolId, { value: amount });
+      const tx = await this.bitrPoolContract.placeBet(poolId, { value: amount });
       const receipt = await tx.wait();
 
       console.log(`✅ Bet placed successfully: ${tx.hash}`);
@@ -128,11 +128,11 @@ class BitrPoolService {
    */
   async settlePool(poolId, outcome) {
     try {
-      if (!this.bitredictPoolContract) {
+      if (!this.bitrPoolContract) {
         await this.initialize();
       }
 
-      const tx = await this.bitredictPoolContract.settlePool(poolId, outcome);
+      const tx = await this.bitrPoolContract.settlePool(poolId, outcome);
       const receipt = await tx.wait();
 
       console.log(`✅ Pool settled successfully: ${tx.hash}`);
@@ -157,11 +157,11 @@ class BitrPoolService {
    */
   async getPoolDetails(poolId) {
     try {
-      if (!this.bitredictPoolContract) {
+      if (!this.bitrPoolContract) {
         await this.initialize();
       }
 
-      const pool = await this.bitredictPoolContract.pools(poolId);
+      const pool = await this.bitrPoolContract.pools(poolId);
       
       return {
         poolId: poolId,

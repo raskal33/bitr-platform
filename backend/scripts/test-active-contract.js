@@ -4,7 +4,7 @@ const config = require('../config');
 /**
  * Test Active Contract Script
  * 
- * This script tests the active BitredictPool contract to ensure it's working correctly
+ * This script tests the active BitrPool contract to ensure it's working correctly
  * and can be used for market creation.
  */
 class ActiveContractTester {
@@ -16,8 +16,8 @@ class ActiveContractTester {
   async initialize() {
     try {
       // Load contract ABI
-      const poolABI = require('../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json').abi;
-      this.poolContract = new ethers.Contract(config.blockchain.contractAddresses.bitredictPool, poolABI, this.provider);
+      const poolABI = require('../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json').abi;
+      this.poolContract = new ethers.Contract(config.blockchain.contractAddresses.bitrPool, poolABI, this.provider);
       
       console.log('🔍 Testing Active Contract...\n');
       console.log(`Contract Address: ${this.poolContract.target}`);
