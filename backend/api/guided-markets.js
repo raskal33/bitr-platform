@@ -889,7 +889,7 @@ router.post('/football/prepare', async (req, res) => {
 
     // Get contract address from config
     const config = require('../config');
-    const contractAddress = config.blockchain.contractAddresses.bitredictPool;
+    const contractAddress = config.blockchain.contractAddresses.bitrPool;
 
     // Store fixture mapping data EARLY - during prepare phase, not just after confirmation
     try {

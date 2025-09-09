@@ -340,9 +340,9 @@ class Web3Service {
       return this.bitrPoolContract;
     }
 
-    const contractAddress = process.env.BITREDICT_POOL_ADDRESS;
+    const contractAddress = process.env.BITR_POOL_ADDRESS;
     if (!contractAddress) {
-      throw new Error('BITREDICT_POOL_ADDRESS environment variable not set');
+      throw new Error('BITR_POOL_ADDRESS environment variable not set');
     }
 
     let BitrPoolABI;
