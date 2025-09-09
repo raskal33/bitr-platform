@@ -20,10 +20,10 @@ class BitredictPoolService {
     try {
       this.web3Service = new Web3Service();
       await this.web3Service.initialize();
-      this.bitredictPoolContract = await this.web3Service.getBitredictPoolContract();
-      console.log('✅ BitredictPool Service initialized');
+      this.bitrPoolContract = await this.web3Service.getBitrPoolContract();
+      console.log('✅ BitrPool Service initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize BitredictPool Service:', error);
+      console.error('❌ Failed to initialize BitrPool Service:', error);
       throw error;
     }
   }

@@ -477,4 +477,133 @@ router.get('/leaderboards', async (req, res) => {
   }
 });
 
+// GET /api/analytics/platform-stats - Get platform statistics
+router.get('/platform-stats', async (req, res) => {
+  try {
+    const db = require('../db/db');
+    
+    // Get comprehensive platform statistics
+    const [
+      poolStats,
+      userStats,
+      volumeStats,
+      oddysseyStats,
+      recentActivity
+    ] = await Promise.all([
+      // Pool statistics
+      db.query(`
+        SELECT 
+          COUNT(*) as total_pools,
+          COUNT(*) FILTER (WHERE status = 'active') as active_pools,
+          COUNT(*) FILTER (WHERE status = 'settled') as settled_pools,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') as pools_24h
+        FROM oracle.pools
+      `),
+      
+      // User statistics
+      db.query(`
+        SELECT 
+          COUNT(DISTINCT creator_address) as total_creators,
+          COUNT(DISTINCT bettor_address) as total_bettors,
+          COUNT(DISTINCT bettor_address) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') as active_users_24h
+        FROM oracle.pool_bets
+      `),
+      
+      // Volume statistics
+      db.query(`
+        SELECT 
+          COALESCE(SUM(amount), 0) as total_volume,
+          COALESCE(SUM(amount) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'), 0) as volume_24h,
+          COALESCE(SUM(amount) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days'), 0) as volume_7d,
+          COUNT(*) as total_bets,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') as bets_24h
+        FROM oracle.pool_bets
+      `),
+      
+      // Oddyssey statistics
+      db.query(`
+        SELECT 
+          COUNT(*) as total_cycles,
+          COUNT(*) FILTER (WHERE status = 'active') as active_cycles,
+          COALESCE(SUM(slip_count), 0) as total_slips,
+          COALESCE(SUM(prize_pool), 0) as total_prize_pool
+        FROM oracle.oddyssey_cycles
+      `),
+      
+      // Recent activity
+      db.query(`
+        SELECT 
+          'pool_created' as activity_type,
+          pool_id::text as item_id,
+          creator_address as user_address,
+          created_at
+        FROM oracle.pools
+        WHERE created_at >= NOW() - INTERVAL '24 hours'
+        
+        UNION ALL
+        
+        SELECT 
+          'bet_placed' as activity_type,
+          pool_id::text as item_id,
+          bettor_address as user_address,
+          created_at
+        FROM oracle.pool_bets
+        WHERE created_at >= NOW() - INTERVAL '24 hours'
+        
+        UNION ALL
+        
+        SELECT 
+          'slip_placed' as activity_type,
+          slip_id::text as item_id,
+          player_address as user_address,
+          placed_at as created_at
+        FROM oracle.oddyssey_slips
+        WHERE placed_at >= NOW() - INTERVAL '24 hours'
+        
+        ORDER BY created_at DESC
+        LIMIT 50
+      `)
+    ]);
+    
+    const stats = {
+      pools: {
+        total: parseInt(poolStats.rows[0]?.total_pools || 0),
+        active: parseInt(poolStats.rows[0]?.active_pools || 0),
+        settled: parseInt(poolStats.rows[0]?.settled_pools || 0),
+        created_24h: parseInt(poolStats.rows[0]?.pools_24h || 0)
+      },
+      users: {
+        total_creators: parseInt(userStats.rows[0]?.total_creators || 0),
+        total_bettors: parseInt(userStats.rows[0]?.total_bettors || 0),
+        active_24h: parseInt(userStats.rows[0]?.active_users_24h || 0)
+      },
+      volume: {
+        total: parseFloat(volumeStats.rows[0]?.total_volume || 0),
+        volume_24h: parseFloat(volumeStats.rows[0]?.volume_24h || 0),
+        volume_7d: parseFloat(volumeStats.rows[0]?.volume_7d || 0),
+        total_bets: parseInt(volumeStats.rows[0]?.total_bets || 0),
+        bets_24h: parseInt(volumeStats.rows[0]?.bets_24h || 0)
+      },
+      oddyssey: {
+        total_cycles: parseInt(oddysseyStats.rows[0]?.total_cycles || 0),
+        active_cycles: parseInt(oddysseyStats.rows[0]?.active_cycles || 0),
+        total_slips: parseInt(oddysseyStats.rows[0]?.total_slips || 0),
+        total_prize_pool: parseFloat(oddysseyStats.rows[0]?.total_prize_pool || 0)
+      },
+      recent_activity: recentActivity.rows
+    };
+    
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Error fetching platform stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch platform statistics'
+    });
+  }
+});
+
 module.exports = router; 

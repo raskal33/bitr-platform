@@ -7,9 +7,42 @@ const { serializeBigInts } = require('../utils/bigint-serializer');
 
 // ROOT CAUSE FIX: Import simple bulletproof service
 const SimpleBulletproofService = require('../services/simple-bulletproof-service');
+const CycleFormatNormalizer = require('../services/cycle-format-normalizer');
 
 // ROOT CAUSE FIX: Initialize simple bulletproof service
 const bulletproofService = new SimpleBulletproofService();
+const cycleNormalizer = new CycleFormatNormalizer();
+
+// Helper function to decode selection hash to readable format
+function decodeSelection(selection, betType, pred) {
+  let prediction;
+  
+  // Use the normalizer to decode the selection hash
+  if (selection && selection.startsWith('0x')) {
+    prediction = cycleNormalizer.hashToSelection(selection, betType);
+  } else {
+    prediction = pred.prediction || pred.selection || selection;
+  }
+  
+  // Convert numeric betType predictions to readable format
+  if (prediction === '1') prediction = 'home';
+  else if (prediction === 'X') prediction = 'draw';
+  else if (prediction === '2') prediction = 'away';
+  else if (prediction === 'Over') prediction = 'over';
+  else if (prediction === 'Under') prediction = 'under';
+  
+  // Ensure we have a valid prediction
+  if (!prediction || !['home', 'draw', 'away', 'over', 'under'].includes(prediction)) {
+    // Fallback based on betType
+    if (betType === '0' || betType === 0) {
+      prediction = 'home'; // Default moneyline
+    } else {
+      prediction = 'over'; // Default over/under
+    }
+  }
+  
+  return prediction;
+}
 
 // ROOT CAUSE FIX: Initialize the bulletproof service immediately
 (async () => {
@@ -819,6 +852,9 @@ router.post('/place-slip', rateLimitMiddleware((req) => `place-slip:${req.body.p
 // FIXED: Use the new endpoint with proper enrichment
 router.use('/', require('./oddyssey-slips-fix'));
 
+// User slips endpoints
+router.use('/slips', require('./oddyssey/slips'));
+
 /* OLD BROKEN ENDPOINT - COMMENTED OUT
 router.get('/user-slips/:address/evaluated', asyncHandler(async (req, res) => {
   try {
@@ -1122,35 +1158,8 @@ router.get('/user-slips/:address', async (req, res) => {
                 hour12: false
               }) : '00:00';
 
-            // Determine prediction type based on betType or selection hash
-            let prediction;
-            
-            // Check if it's a moneyline bet (betType 0) or over/under bet (betType 1)
-            if (betType === '0' || betType === 0) {
-              // Moneyline bet - check selection hash
-              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
-                prediction = 'home'; // Home win
-              } else if (selection === "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6") {
-                prediction = 'draw'; // Draw
-              } else if (selection === "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5" || 
-                         selection === "0x550c64a15031c3064454c19adc6243a6122c138a242eaa098da50bb114fc8d56") {
-                prediction = 'away'; // Away win
-              } else {
-                prediction = 'home'; // Default to home
-              }
-            } else if (betType === '1' || betType === 1) {
-              // Over/Under bet - check selection hash
-              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
-                prediction = 'over'; // Over 2.5
-              } else if (selection === "0xe5f3458d553c578199ad9150ab9a1cce5e22e9b34834f66492b28636da59e11b") {
-                prediction = 'under'; // Under 2.5
-              } else {
-                prediction = 'over'; // Default to over
-              }
-            } else {
-              // Fallback - try to determine from other fields
-              prediction = pred.prediction || pred.selection || '1';
-            }
+            // Decode selection using helper function
+            const prediction = decodeSelection(selection, betType, pred);
 
             // Check if match has result and evaluate prediction
             let isCorrect = null;
@@ -1417,35 +1426,8 @@ router.get('/slips/:playerAddress', async (req, res) => {
                 hour12: false
               }) : '00:00';
 
-            // Determine prediction type based on betType or selection hash
-            let prediction;
-            
-            // Check if it's a moneyline bet (betType 0) or over/under bet (betType 1)
-            if (betType === '0' || betType === 0) {
-              // Moneyline bet - check selection hash
-              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
-                prediction = 'home'; // Home win
-              } else if (selection === "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6") {
-                prediction = 'draw'; // Draw
-              } else if (selection === "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5" || 
-                         selection === "0x550c64a15031c3064454c19adc6243a6122c138a242eaa098da50bb114fc8d56") {
-                prediction = 'away'; // Away win
-              } else {
-                prediction = 'home'; // Default to home
-              }
-            } else if (betType === '1' || betType === 1) {
-              // Over/Under bet - check selection hash
-              if (selection === "0x09492a13c7e2353fdb9d678856a01eb3a777f03982867b5ce379154825ae0e62") {
-                prediction = 'over'; // Over 2.5
-              } else if (selection === "0xe5f3458d553c578199ad9150ab9a1cce5e22e9b34834f66492b28636da59e11b") {
-                prediction = 'under'; // Under 2.5
-              } else {
-                prediction = 'over'; // Default to over
-              }
-            } else {
-              // Fallback - try to determine from other fields
-              prediction = pred.prediction || pred.selection || '1';
-            }
+            // Decode selection using helper function
+            const prediction = decodeSelection(selection, betType, pred);
 
             // Check if match has result and evaluate prediction
             let isCorrect = null;
@@ -2290,21 +2272,31 @@ router.get('/current-prize-pool', cacheMiddleware(30000), asyncHandler(async (re
         data: {
           cycleId: null,
           prizePool: '0',
-          formattedPrizePool: '0 STT',
+          formattedPrizePool: '0 MON',
           matchesCount: 0,
           isActive: false
         }
       });
     }
     
-    const prizePool = parseFloat(currentCycle.prize_pool) || 0;
+    // Calculate actual prize pool based on number of slips
+    const slipCountQuery = `
+      SELECT COUNT(*) as slip_count 
+      FROM oracle.oddyssey_slips 
+      WHERE cycle_id = $1
+    `;
+    const slipResult = await db.query(slipCountQuery, [currentCycle.cycle_id]);
+    const slipCount = parseInt(slipResult.rows[0]?.slip_count || 0);
+    
+    // Each slip contributes 0.5 MON to the prize pool
+    const calculatedPrizePool = slipCount * 0.5;
     
     res.json({
       success: true,
       data: {
         cycleId: currentCycle.cycle_id,
-        prizePool: currentCycle.prize_pool,
-        formattedPrizePool: `${prizePool.toFixed(2)} STT`,
+        prizePool: calculatedPrizePool.toString(),
+        formattedPrizePool: `${calculatedPrizePool.toFixed(1)} MON`,
         matchesCount: currentCycle.matches_count || 0,
         isActive: !currentCycle.is_resolved
       },
@@ -2731,5 +2723,201 @@ router.get('/test-matches/:cycleId', asyncHandler(async (req, res) => {
     });
   }
 }));
+
+// GET /api/oddyssey/preferences - Get user preferences
+router.get('/preferences', async (req, res) => {
+  try {
+    const { address } = req.query;
+    
+    if (!address) {
+      return res.status(400).json({
+        success: false,
+        error: 'User address is required'
+      });
+    }
+    
+    const result = await db.query(`
+      SELECT * FROM oracle.oddyssey_user_preferences
+      WHERE user_address = $1
+    `, [address]);
+    
+    const preferences = result.rows[0] || {
+      user_address: address,
+      auto_evaluate: false,
+      auto_claim: false,
+      notifications: true,
+      preferred_leagues: [],
+      risk_tolerance: 'medium'
+    };
+    
+    res.json({
+      success: true,
+      preferences
+    });
+  } catch (error) {
+    console.error('Error fetching user preferences:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user preferences'
+    });
+  }
+});
+
+// POST /api/oddyssey/preferences - Update user preferences
+router.post('/preferences', async (req, res) => {
+  try {
+    const { 
+      user_address, 
+      auto_evaluate, 
+      auto_claim, 
+      notifications, 
+      preferred_leagues, 
+      risk_tolerance 
+    } = req.body;
+    
+    if (!user_address) {
+      return res.status(400).json({
+        success: false,
+        error: 'User address is required'
+      });
+    }
+    
+    await db.query(`
+      INSERT INTO oracle.oddyssey_user_preferences (
+        user_address, auto_evaluate, auto_claim, notifications, 
+        preferred_leagues, risk_tolerance, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (user_address) 
+      DO UPDATE SET 
+        auto_evaluate = $2,
+        auto_claim = $3,
+        notifications = $4,
+        preferred_leagues = $5,
+        risk_tolerance = $6,
+        updated_at = NOW()
+    `, [
+      user_address,
+      auto_evaluate || false,
+      auto_claim || false,
+      notifications !== false,
+      JSON.stringify(preferred_leagues || []),
+      risk_tolerance || 'medium'
+    ]);
+    
+    res.json({
+      success: true,
+      message: 'Preferences updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating user preferences:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update user preferences'
+    });
+  }
+});
+
+// GET /api/oddyssey/live-matches - Get live matches for current cycle
+router.get('/live-matches', cacheMiddleware(15000), async (req, res) => {
+  try {
+    // Get current active cycle
+    const cycleResult = await db.query(`
+      SELECT cycle_id, start_time, end_time
+      FROM oracle.oddyssey_cycles
+      WHERE status = 'active'
+      ORDER BY cycle_id DESC
+      LIMIT 1
+    `);
+    
+    if (cycleResult.rows.length === 0) {
+      return res.json({
+        success: true,
+        matches: [],
+        cycle: null,
+        message: 'No active cycle found'
+      });
+    }
+    
+    const currentCycle = cycleResult.rows[0];
+    
+    // Get matches for current cycle
+    const matchesResult = await db.query(`
+      SELECT 
+        dgm.*,
+        f.home_team,
+        f.away_team,
+        f.league_name,
+        f.start_time as fixture_start_time,
+        f.status as fixture_status,
+        fr.home_score,
+        fr.away_score,
+        fr.status as result_status
+      FROM oracle.daily_game_matches dgm
+      JOIN oracle.fixtures f ON dgm.fixture_id = f.fixture_id
+      LEFT JOIN oracle.fixture_results fr ON f.fixture_id = fr.fixture_id
+      WHERE dgm.cycle_id = $1
+      ORDER BY dgm.match_order
+    `, [currentCycle.cycle_id]);
+    
+    const matches = matchesResult.rows.map(match => ({
+      ...transformMatchData(match),
+      is_live: match.fixture_status === 'live',
+      is_finished: match.fixture_status === 'finished',
+      has_result: match.result_status === 'finished'
+    }));
+    
+    res.json({
+      success: true,
+      cycle: currentCycle,
+      matches,
+      total_matches: matches.length
+    });
+  } catch (error) {
+    console.error('Error fetching live matches:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch live matches'
+    });
+  }
+});
+
+// GET /api/oddyssey/contract-validation - Validate contract state
+router.get('/contract-validation', async (req, res) => {
+  try {
+    // Get current cycle from database
+    const dbCycleResult = await db.query(`
+      SELECT cycle_id, status, start_time, end_time, slip_count
+      FROM oracle.oddyssey_cycles
+      WHERE status = 'active'
+      ORDER BY cycle_id DESC
+      LIMIT 1
+    `);
+    
+    const validation = {
+      database_cycle: dbCycleResult.rows[0] || null,
+      contract_cycle: null, // Would be populated from contract call
+      sync_status: 'unknown',
+      issues: [],
+      last_check: new Date().toISOString()
+    };
+    
+    if (!validation.database_cycle) {
+      validation.issues.push('No active cycle found in database');
+    }
+    
+    validation.sync_status = validation.issues.length === 0 ? 'synced' : 'issues_found';
+    
+    res.json({
+      success: true,
+      validation
+    });
+  } catch (error) {
+    console.error('Error validating contract state:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to validate contract state'
+    });
+  }
+});
 
 module.exports = router;

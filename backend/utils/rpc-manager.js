@@ -10,16 +10,17 @@ const { ethers } = require('ethers');
 class RpcManager {
   constructor(rpcUrls = [], options = {}) {
     this.rpcUrls = rpcUrls.length > 0 ? rpcUrls : [
-      'https://testnet-rpc.monad.xyz/',
-      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/'
+      'https://rpc.ankr.com/monad_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205', // ANKR Premium (500+ req/sec) - PRIMARY!
+      'https://testnet-rpc.monad.xyz/',                    // Monad official (25 req/sec) - Fallback
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/', // QuickNode (15 req/sec) - Emergency
     ];
     
     this.options = {
-      maxRetries: options.maxRetries || 3,
-      baseDelay: options.baseDelay || 1000, // 1 second
-      maxDelay: options.maxDelay || 30000,   // 30 seconds
-      circuitBreakerThreshold: options.circuitBreakerThreshold || 5,
-      circuitBreakerTimeout: options.circuitBreakerTimeout || 60000, // 1 minute
+      maxRetries: options.maxRetries || 5, // More retries for premium
+      baseDelay: options.baseDelay || 200, // 200ms (5x faster)
+      maxDelay: options.maxDelay || 10000,   // 10 seconds (3x faster)
+      circuitBreakerThreshold: options.circuitBreakerThreshold || 8, // Higher threshold for premium
+      circuitBreakerTimeout: options.circuitBreakerTimeout || 30000, // 30 seconds (2x faster)
       ...options
     };
     
@@ -27,6 +28,22 @@ class RpcManager {
     this.currentProviderIndex = 0;
     this.failureCounts = new Map();
     this.circuitBreakerState = new Map(); // 'closed', 'open', 'half-open'
+    
+    // Smart load balancing - track usage and rate limits - PREMIUM OPTIMIZED
+    this.providerStats = new Map();
+    this.providerRateLimits = new Map([
+      [0, { name: 'ANKR Premium', maxReqPerSec: 500, weight: 10 }],     // PREMIUM! 500+ req/sec
+      [1, { name: 'Monad Official', maxReqPerSec: 25, weight: 1 }],     // Fallback
+      [2, { name: 'QuickNode', maxReqPerSec: 15, weight: 0.5 }]        // Emergency only
+    ]);
+    this.lastRequestTime = new Map();
+    this.requestCounts = new Map();
+    
+    // Initialize Maps first, then providers
+    for (let i = 0; i < this.rpcUrls.length; i++) {
+      this.requestCounts.set(i, 0);
+      this.lastRequestTime.set(i, 0);
+    }
     
     this.initializeProviders();
   }
@@ -41,7 +58,12 @@ class RpcManager {
         this.providers.set(index, { url, provider });
         this.failureCounts.set(index, 0);
         this.circuitBreakerState.set(index, 'closed');
-        console.log(`✅ RPC Provider ${index} initialized: ${url}`);
+        this.requestCounts.set(index, 0);
+        this.lastRequestTime.set(index, 0);
+        
+        const providerInfo = this.providerRateLimits.get(index);
+        console.log(`✅ RPC Provider ${index} initialized: ${providerInfo?.name || 'Unknown'} (${url})`);
+        console.log(`   📊 Rate limit: ${providerInfo?.maxReqPerSec || 'Unknown'} req/sec, Weight: ${providerInfo?.weight || 1}`);
       } catch (error) {
         console.error(`❌ Failed to initialize RPC Provider ${index} (${url}):`, error.message);
       }
@@ -144,10 +166,26 @@ class RpcManager {
     let attempt = 0;
     
     while (attempt < this.options.maxRetries) {
-      const startProviderIndex = this.currentProviderIndex;
+      // Use smart provider selection for better load balancing
+      const selectedProviderIndex = this.selectBestProvider();
+      this.currentProviderIndex = selectedProviderIndex;
+      const startProviderIndex = selectedProviderIndex;
       
       try {
         const { provider } = this.getCurrentProvider();
+        
+        // Premium RPC rate limiting - much more aggressive!
+        const providerInfo = this.providerRateLimits.get(this.currentProviderIndex);
+        if (this.lastRequestTime) {
+          const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+          // Dynamic delay based on provider capabilities
+          const minDelay = providerInfo?.name === 'ANKR Premium' ? 2 : 50; // 2ms for premium, 50ms for others
+          if (timeSinceLastRequest < minDelay) {
+            await new Promise(resolve => setTimeout(resolve, minDelay - timeSinceLastRequest));
+          }
+        }
+        this.lastRequestTime = Date.now();
+        
         const result = await operation(provider);
         
         // Record success
@@ -194,6 +232,17 @@ class RpcManager {
   async getProvider() {
     const providerInfo = this.getCurrentProvider();
     return providerInfo.provider;
+  }
+  
+  /**
+   * Simple provider selection - using round-robin to avoid Map initialization issues
+   */
+  selectBestProvider() {
+    // TEMPORARY FIX: Use simple round-robin to avoid Map errors
+    console.log('🔄 Using simple round-robin provider selection');
+    const selectedProvider = this.currentProviderIndex;
+    this.currentProviderIndex = (this.currentProviderIndex + 1) % this.providers.size;
+    return selectedProvider;
   }
   
   async getBlockNumber() {

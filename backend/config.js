@@ -14,25 +14,27 @@ module.exports = {
 
   // Blockchain configuration - Monad Testnet
   blockchain: {
-    rpcUrl: process.env.RPC_URL || 'https://testnet-rpc.monad.xyz/',
-    fallbackRpcUrl: process.env.FALLBACK_RPC_URL || 'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/',
-    // Multi-RPC configuration for load balancing
+    rpcUrl: process.env.RPC_URL || 'https://rpc.ankr.com/monad_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205',
+    fallbackRpcUrl: process.env.FALLBACK_RPC_URL || 'https://testnet-rpc.monad.xyz/',
+    // Multi-RPC configuration for load balancing - ANKR Premium First!
     rpcUrls: [
-      'https://testnet-rpc.monad.xyz/',                    // Monad official (25 req/sec)
-      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/', // QuickNode (15 req/sec)
-      'https://rpc.ankr.com/monad_testnet'                 // Ankr (30 req/sec) - BEST!
+      'https://rpc.ankr.com/monad_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205', // ANKR Premium (500+ req/sec) - PRIMARY!
+      'https://testnet-rpc.monad.xyz/',                    // Monad official (25 req/sec) - Fallback
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/', // QuickNode (15 req/sec) - Emergency
     ],
     // Free tier optimization
     freeTierMode: process.env.FREE_TIER_MODE === 'true',
     chainId: process.env.CHAIN_ID || 10143,
     privateKey: process.env.PRIVATE_KEY,
     startBlock: process.env.START_BLOCK || 0,
-    // Indexer settings
+    // Indexer settings - BALANCED PREMIUM RPC (Conservative but effective)
     indexer: {
-      pollInterval: parseInt(process.env.POLL_INTERVAL) || 5000, // 5 seconds between polls
-      rpcDelay: parseInt(process.env.RPC_DELAY) || 100, // 100ms delay between RPC calls
-      batchSize: parseInt(process.env.BATCH_SIZE) || 1, // Process 1 block at a time
-      maxRetries: parseInt(process.env.MAX_RETRIES) || 3
+      pollInterval: parseInt(process.env.POLL_INTERVAL) || 1000, // 1s between polls (balanced)
+      rpcDelay: parseInt(process.env.RPC_DELAY) || 50, // 50ms delay between RPC calls (balanced)
+      batchSize: parseInt(process.env.BATCH_SIZE) || 20, // Process 20 blocks at a time (balanced)
+      maxRetries: parseInt(process.env.MAX_RETRIES) || 5, // More retries for reliability
+      maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 4, // Conservative parallel requests
+      aggressiveMode: process.env.AGGRESSIVE_MODE !== 'false' // Enable aggressive indexing by default
     },
     // Monad-specific settings
     monad: {
@@ -67,8 +69,10 @@ module.exports = {
         'https://bitredict.vercel.app',
         'https://bitredict.io',
         'https://bitr-front-ap9z.vercel.app',
+        'https://predict-linux.vercel.app',
         'http://localhost:8080',
-        'http://localhost:3000'
+        'http://localhost:3000',
+        'http://localhost:3001'
       ],
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
       allowedHeaders: [
@@ -77,11 +81,14 @@ module.exports = {
         'X-Requested-With',
         'X-API-Key',
         'Accept',
-        'Origin'
+        'Origin',
+        'Access-Control-Request-Method',
+        'Access-Control-Request-Headers'
       ],
       credentials: true,
       optionsSuccessStatus: 200,
-      preflightContinue: false
+      preflightContinue: false,
+      maxAge: 86400 // 24 hours cache for preflight
     },
     rateLimit: {
       windowMs: 15 * 60 * 1000, // 15 minutes
@@ -163,19 +170,28 @@ module.exports = {
     ]
   },
 
-  // Indexer configuration - Monad Testnet Optimized
+  // Indexer configuration - MONAD 400ms BLOCK OPTIMIZED
   indexer: {
     startBlock: process.env.START_BLOCK || '164312555', // Start from recent block instead of 0
-    batchSize: process.env.BATCH_SIZE || 100, // Reduced for Monad's 400ms blocks
-    pollInterval: process.env.POLL_INTERVAL || 500, // 500ms polling (faster than block time)
-    confirmationBlocks: process.env.CONFIRMATION_BLOCKS || 2, // Reduced for Monad's 800ms finality
-    maxRetries: process.env.MAX_RETRIES || 5, // Increased for higher throughput
-    retryDelay: process.env.RETRY_DELAY || 2000, // 2 seconds (reduced for fast recovery)
-    // Monad-specific settings
+    batchSize: process.env.BATCH_SIZE || 25, // Optimized for 400ms blocks (25 blocks = 10 seconds)
+    pollInterval: process.env.POLL_INTERVAL || 300, // 300ms polling (faster than block time for real-time)
+    confirmationBlocks: process.env.CONFIRMATION_BLOCKS || 1, // Minimal confirmations for 400ms blocks
+    maxRetries: process.env.MAX_RETRIES || 5, // Reasonable retries
+    retryDelay: process.env.RETRY_DELAY || 500, // 500ms retry delay (faster for 400ms blocks)
+    maxConcurrentBatches: process.env.MAX_CONCURRENT_BATCHES || 3, // Higher concurrency for fast blocks
+    // Monad-specific settings - 400ms BLOCK OPTIMIZED
     monadOptimized: true,
-    blockTime: 400, // 400ms block time
-    finality: 800, // 800ms finality
-    maxLag: 500 // Maximum acceptable lag in blocks
+    premiumRpc: true, // Flag for premium RPC optimizations
+    blockTime: 400, // 400ms block time - CRITICAL FOR TIMING
+    finality: 800, // 800ms finality (2 blocks)
+    maxLag: 25, // STRICT: Never exceed 25 blocks (10 seconds) for 400ms blocks
+    lagAlertThreshold: 15, // Alert if lag exceeds 15 blocks (6 seconds)
+    emergencyMode: {
+      enabled: true,
+      lagThreshold: 50, // Trigger emergency mode at 50 blocks lag (20 seconds)
+      maxBatchSize: 75, // Emergency batch size for fast catch-up
+      minPollInterval: 100 // Emergency polling interval (100ms - very fast)
+    }
   },
 
   // External services

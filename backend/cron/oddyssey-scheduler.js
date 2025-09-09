@@ -117,9 +117,18 @@ class OddysseyScheduler {
         
         console.log(`🎯 Selecting and persisting matches for today: ${todayDate}`);
         
-        // Use PersistentDailyGameManager to select and persist matches for today
-        const persistentManager = new (require('../services/persistent-daily-game-manager'))();
-        const result = await persistentManager.selectAndPersistDailyMatches(todayDate);
+        // Use RobustOddysseySelector to select and persist matches (with multi-day fallback)
+        const RobustOddysseySelector = require('../services/robust-oddyssey-selector');
+        const robustSelector = new RobustOddysseySelector();
+        const selections = await robustSelector.selectOddysseyMatches(todayDate);
+        await robustSelector.saveOddysseyMatches(selections, null, todayDate);
+        
+        const result = {
+          matchCount: selections.selectedMatches.length,
+          totalCandidates: selections.totalCandidates,
+          daysSearched: selections.daysSearched,
+          overwriteProtected: false
+        };
         
         console.log(`✅ Match selection completed for today (${todayDate}):`);
         console.log(`   Matches selected: ${result.matchCount}`);

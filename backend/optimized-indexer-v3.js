@@ -17,16 +17,17 @@ const RpcManager = require('./utils/rpc-manager');
 
 class OptimizedIndexerV3 {
   constructor() {
-    // Initialize RPC Manager with Monad Testnet endpoints (main + fallback)
+    // Initialize RPC Manager with PREMIUM ANKR RPC (main + fallbacks)
     this.rpcManager = new RpcManager([
-      'https://testnet-rpc.monad.xyz/', // Main RPC
-      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/' // Fallback RPC
+      'https://rpc.ankr.com/monad_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205', // PREMIUM ANKR!
+      'https://testnet-rpc.monad.xyz/', // Fallback RPC
+      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/' // Emergency RPC
     ], {
-      maxRetries: 5, // Reduced for Monad's fast finality
-      baseDelay: 500, // Faster retry for 400ms blocks
-      maxDelay: 10000, // Reduced max delay
-      circuitBreakerThreshold: 3, // Lower threshold for fast recovery
-      circuitBreakerTimeout: 30000 // Shorter timeout for Monad
+      maxRetries: 8, // More retries for premium reliability
+      baseDelay: 100, // 5x faster retry for premium RPC
+      maxDelay: 5000, // 2x faster max delay
+      circuitBreakerThreshold: 8, // Higher threshold for premium
+      circuitBreakerTimeout: 15000 // 2x faster timeout for premium
     });
     
     this.isRunning = false;
@@ -34,11 +35,11 @@ class OptimizedIndexerV3 {
     this.consecutiveErrors = 0;
     this.maxConsecutiveErrors = 15;
     
-    // Monad-optimized batch processing settings (400ms blocks, 10k TPS)
-    this.batchSize = 100; // Smaller batches for 400ms blocks
-    this.maxBatchSize = 250; // Reduced max for Monad's fast finality
-    this.processingDelay = 100; // 100ms between batches (faster than block time)
-    this.maxParallelQueries = 5; // Higher concurrency for Monad's throughput
+    // PREMIUM RPC optimized batch processing settings (400ms blocks, 10k TPS)
+    this.batchSize = 300; // MUCH larger batches for premium RPC
+    this.maxBatchSize = 500; // INCREASED max for premium RPC capabilities
+    this.processingDelay = 50; // 50ms between batches (2x faster!)
+    this.maxParallelQueries = 15; // 3x higher concurrency for premium RPC
     
     // State management
     this.state = {
@@ -424,18 +425,23 @@ class OptimizedIndexerV3 {
   async processBatch(fromBlock, toBlock) {
     console.log(`🔧 Processing batch: ${fromBlock} to ${toBlock}`);
     
-    // Process events with controlled concurrency
-    const promises = [
+    // Process events with controlled concurrency and track event counts
+    const [poolEvents, oracleEvents, oddysseyEvents, reputationEvents] = await Promise.all([
       this.processPoolEvents(fromBlock, toBlock),
       this.processOracleEvents(fromBlock, toBlock),
       this.processOddysseyEvents(fromBlock, toBlock),
       this.processReputationEvents(fromBlock, toBlock)
-    ];
+    ]);
     
-    await Promise.all(promises);
+    const totalEvents = (poolEvents || 0) + (oracleEvents || 0) + (oddysseyEvents || 0) + (reputationEvents || 0);
     
-    // Mark blocks as indexed
-    await this.markBlocksIndexed(fromBlock, toBlock);
+    // Only mark blocks as indexed if we found events or if this is a checkpoint range
+    if (totalEvents > 0 || (fromBlock % 100 === 0)) {
+      await this.markBlocksIndexed(fromBlock, toBlock);
+      console.log(`💾 Saved batch ${fromBlock}-${toBlock} (${totalEvents} events found)`);
+    } else {
+      console.log(`⏭️ Skipped saving batch ${fromBlock}-${toBlock} (no events found)`);
+    }
   }
 
   async processPoolEvents(fromBlock, toBlock) {
@@ -587,6 +593,7 @@ class OptimizedIndexerV3 {
       console.log(`✅ Processed ${totalEvents} pool events`);
       this.state.totalEvents += totalEvents;
       
+      return totalEvents;
     } catch (error) {
       console.error('❌ Error processing pool events:', error);
       throw error;
@@ -621,6 +628,7 @@ class OptimizedIndexerV3 {
       
       console.log(`✅ Processed ${oracleEvents.length} oracle events`);
       
+      return oracleEvents.length;
     } catch (error) {
       console.error('❌ Error processing oracle events:', error);
       throw error;
@@ -740,6 +748,7 @@ class OptimizedIndexerV3 {
       console.log(`✅ Processed ${totalEvents} Oddyssey events`);
       this.state.totalEvents += totalEvents;
       
+      return totalEvents;
     } catch (error) {
       console.error('❌ Error processing Oddyssey events:', error);
       throw error;
@@ -764,34 +773,13 @@ class OptimizedIndexerV3 {
       
       console.log(`✅ Processed ${reputationEvents.length} reputation events`);
       
+      return reputationEvents.length;
     } catch (error) {
       console.error('❌ Error processing reputation events:', error);
       throw error;
     }
   }
 
-  async markBlocksIndexed(fromBlock, toBlock) {
-    try {
-      const db = require('./db/db');
-      
-      // Batch insert for better performance
-      const values = [];
-      for (let i = fromBlock; i <= toBlock; i++) {
-        values.push(`(${i}, NOW())`);
-      }
-      
-      if (values.length > 0) {
-        await db.query(`
-          INSERT INTO oracle.indexed_blocks (block_number, indexed_at)
-          VALUES ${values.join(', ')}
-          ON CONFLICT (block_number) DO UPDATE SET indexed_at = NOW()
-        `);
-      }
-      
-    } catch (error) {
-      console.error('❌ Error marking blocks as indexed:', error);
-    }
-  }
 
   async handleError(error) {
     if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
@@ -834,7 +822,7 @@ class OptimizedIndexerV3 {
         console.log(`📋 Complete pool data fetched:`);
         console.log(`   Predicted Outcome: ${poolData.predictedOutcome}`);
         console.log(`   Odds: ${Number(poolData.odds) / 100}`);
-        console.log(`   Creator Stake: ${ethers.formatEther(poolData.creatorStake)} ${poolData.usesBitr ? 'BITR' : 'STT'}`);
+        console.log(`   Creator Stake: ${ethers.formatEther(poolData.creatorStake)} ${poolData.usesBitr ? 'BITR' : 'MON'}`);
         console.log(`   Uses BITR: ${poolData.usesBitr}`);
         console.log(`   League: ${poolData.league}`);
         console.log(`   Category: ${poolData.category}`);
@@ -1449,6 +1437,40 @@ class OptimizedIndexerV3 {
       });
       
     }, 30000); // Log every 30 seconds (more frequent for Monad)
+  }
+
+  async markBlocksIndexed(fromBlock, toBlock) {
+    try {
+      const db = require('./db/db');
+      
+      // Only save blocks if we found events or if this is a checkpoint block
+      const blockRange = toBlock - fromBlock + 1;
+      const checkpointInterval = 100; // Save every 100th block as checkpoint
+      
+      // Check if any blocks in this range should be saved as checkpoints
+      const checkpointBlocks = [];
+      for (let block = fromBlock; block <= toBlock; block++) {
+        if (block % checkpointInterval === 0) {
+          checkpointBlocks.push(block);
+        }
+      }
+      
+      // Save checkpoint blocks
+      for (const block of checkpointBlocks) {
+        await db.query(`
+          INSERT INTO oracle.indexed_blocks (last_block, indexed_at)
+          VALUES ($1, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            last_block = $1,
+            indexed_at = NOW()
+        `, [block]);
+      }
+      
+      console.log(`💾 Saved ${checkpointBlocks.length} checkpoint blocks (${fromBlock}-${toBlock})`);
+      
+    } catch (error) {
+      console.error('❌ Error marking blocks as indexed:', error);
+    }
   }
 
   async sleep(ms) {

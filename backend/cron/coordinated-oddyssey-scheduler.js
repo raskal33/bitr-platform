@@ -216,19 +216,23 @@ class CoordinatedOddysseyScheduler {
       const oddysseyFixtures = await this.sportMonks.fetchOddysseyFixtures();
       console.log(`✅ Retrieved ${oddysseyFixtures.length} fixtures for oddyssey`);
       
-      // Select matches for today using 1-day strategy
-      console.log('🎯 Selecting Oddyssey matches for 1-day strategy...');
-      const selections = await this.oddysseyMatchSelector.selectDailyMatches();
+      // Select matches using robust selector with multi-day fallback
+      console.log('🎯 Selecting Oddyssey matches using robust selector...');
+      const RobustOddysseySelector = require('../services/robust-oddyssey-selector');
+      const robustSelector = new RobustOddysseySelector();
+      const todayDate = new Date().toISOString().split('T')[0];
+      const selections = await robustSelector.selectOddysseyMatches(todayDate);
       
       // Get current cycle ID for linking
       const currentCycleId = await this.oddysseyManager.oddysseyContract.dailyCycleId();
       
       // Save selections to database with cycle ID
-      await this.oddysseyMatchSelector.saveOddysseyMatches(selections, Number(currentCycleId));
+      await robustSelector.saveOddysseyMatches(selections, Number(currentCycleId), todayDate);
       
       console.log(`✅ Coordinated match selection completed:`);
-      console.log(`   Today (${selections.today.date}): ${selections.today.matches.length} matches`);
-      console.log(`   Tomorrow (${selections.tomorrow.date}): ${selections.tomorrow.matches.length} matches`);
+      console.log(`   Selected matches: ${selections.selectedMatches.length}`);
+      console.log(`   Total candidates: ${selections.totalCandidates}`);
+      console.log(`   Days searched: ${selections.daysSearched}`);
       
       // Send notification if webhook configured
       await this.sendNotification('matches_selected', selections);

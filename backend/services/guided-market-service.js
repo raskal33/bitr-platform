@@ -220,12 +220,12 @@ class GuidedMarketService {
     }
 
     // Validate stake amounts
-    const minStake = useBitr ? 1000n * 10n ** 18n : 5n * 10n ** 18n; // 1000 BITR or 5 STT
+    const minStake = useBitr ? 1000n * 10n ** 18n : 5n * 10n ** 18n; // 1000 BITR or 5 MON
     const maxStake = 1000000n * 10n ** 18n; // 1M tokens
     const stakeAmount = BigInt(creatorStake) * 10n ** 18n;
 
     if (stakeAmount < minStake) {
-      throw new Error(`Creator stake must be at least ${useBitr ? '1000 BITR' : '5 STT'}`);
+      throw new Error(`Creator stake must be at least ${useBitr ? '1000 BITR' : '5 MON'}`);
     }
 
     if (stakeAmount > maxStake) {
@@ -303,7 +303,7 @@ class GuidedMarketService {
       marketType: (await this.decodePredictedOutcome(predictedOutcome, 'football', odds, marketId)).betMarketType,
       oddsDecimal: odds / 100,
       creatorStakeWei: stakeAmount.toString(),
-      paymentToken: useBitr ? 'BITR' : 'STT',
+      paymentToken: useBitr ? 'BITR' : 'MON',
       useBitr,
       description,
       userPosition: 'YES - Challenge Supporters'
@@ -359,12 +359,12 @@ class GuidedMarketService {
     }
 
     // Validate stake amounts
-    const minStake = useBitr ? 1000n * 10n ** 18n : 5n * 10n ** 18n; // 1000 BITR or 5 STT
+    const minStake = useBitr ? 1000n * 10n ** 18n : 5n * 10n ** 18n; // 1000 BITR or 5 MON
     const maxStake = 1000000n * 10n ** 18n; // 1M tokens
     const stakeAmount = BigInt(creatorStake) * 10n ** 18n;
 
     if (stakeAmount < minStake) {
-      throw new Error(`Creator stake must be at least ${useBitr ? '1000 BITR' : '5 STT'}`);
+      throw new Error(`Creator stake must be at least ${useBitr ? '1000 BITR' : '5 MON'}`);
     }
 
     if (stakeAmount > maxStake) {
@@ -715,7 +715,7 @@ class GuidedMarketService {
 
     console.log(`🔍 Settling pool ${poolId} automatically...`);
 
-    const contract = await this.web3Service.getBitredictPoolContract();
+    const contract = await this.web3Service.getBitrPoolContract();
     const tx = await contract.settlePoolAutomatically(poolId, {
       gasLimit: 1000000
     });
@@ -1353,7 +1353,7 @@ class GuidedMarketService {
       const poolCountResult = await db.query('SELECT COUNT(*) as count FROM oracle.pools WHERE status = \'active\'');
       const poolCount = parseInt(poolCountResult.rows[0].count);
       
-      // Get stats from database with separate BITR and STT volumes
+      // Get stats from database with separate BITR and MON volumes
       const statsQuery = `
         SELECT 
           COUNT(*) as total_pools,

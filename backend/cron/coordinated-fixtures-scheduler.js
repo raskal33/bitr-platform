@@ -106,6 +106,7 @@ class CoordinatedFixturesScheduler {
    * Execute a job with coordination
    */
   async executeCoordinatedJob(jobName, jobFunction) {
+    const executionId = require('crypto').randomUUID();
     const lockAcquired = await cronCoordinator.acquireLock(jobName, 60); // 60 minute timeout
     
     if (!lockAcquired) {
@@ -118,7 +119,7 @@ class CoordinatedFixturesScheduler {
     let error = null;
 
     try {
-      console.log(`🔄 Starting coordinated job: ${jobName}`);
+      console.log(`🔄 Starting coordinated job: ${jobName} (${executionId})`);
       
       const result = await jobFunction();
       
@@ -128,7 +129,11 @@ class CoordinatedFixturesScheduler {
       console.log(`✅ Completed ${jobName} in ${duration}ms`);
       
       // Log execution
-      await cronCoordinator.logExecution(jobName, status, duration, null, result);
+      try {
+        await cronCoordinator.logExecution(jobName, executionId, status, null, result);
+      } catch (logError) {
+        console.warn(`⚠️ Failed to log execution for ${jobName}:`, logError.message);
+      }
       
     } catch (err) {
       error = err;
@@ -137,7 +142,11 @@ class CoordinatedFixturesScheduler {
       console.error(`❌ Failed ${jobName} after ${duration}ms:`, err.message);
       
       // Log execution with error
-      await cronCoordinator.logExecution(jobName, status, duration, err.message);
+      try {
+        await cronCoordinator.logExecution(jobName, executionId, status, err.message);
+      } catch (logError) {
+        console.warn(`⚠️ Failed to log error execution for ${jobName}:`, logError.message);
+      }
       
     } finally {
       // Always release the lock
@@ -146,32 +155,50 @@ class CoordinatedFixturesScheduler {
   }
 
   /**
-   * Manual fixtures refresh
+   * Manual fixtures refresh (optimized to prevent timeouts)
    */
   async manualRefreshFixtures() {
-    console.log('📅 Starting daily fixtures refresh...');
+    console.log('📅 Starting daily fixtures refresh (optimized)...');
     
     try {
-      // Get fixtures for next 7 days
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + 7);
+      // Use optimized 7-day fetch with timeout protection
+      const result = await Promise.race([
+        this.sportmonksService.fetchAndSave7DayFixtures(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Fixtures fetch timeout after 10 minutes')), 10 * 60 * 1000)
+        )
+      ]);
       
-      const fixtures = await this.sportmonksService.fetchFixtures(
-        new Date().toISOString().split('T')[0],
-        endDate.toISOString().split('T')[0]
-      );
-      
-      console.log(`✅ Refreshed ${fixtures.length} fixtures`);
+      console.log(`✅ Refreshed ${result.totalFixtures} fixtures with ${result.totalOdds} odds`);
       
       return {
         success: true,
-        fixturesCount: fixtures.length,
+        fixturesCount: result.totalFixtures,
+        oddsCount: result.totalOdds,
+        oddysseyReady: result.oddysseyFixtures,
         message: 'Daily fixtures refresh completed'
       };
       
     } catch (error) {
       console.error('❌ Fixtures refresh failed:', error);
-      throw error;
+      
+      // If timeout or error, try to fetch just today's fixtures as fallback
+      try {
+        console.log('🔄 Attempting fallback: fetching today\'s fixtures only...');
+        const today = new Date().toISOString().split('T')[0];
+        const fallbackResult = await this.sportmonksService.fetchFixturesForDate(today);
+        
+        return {
+          success: true,
+          fixturesCount: fallbackResult.length,
+          oddsCount: 0,
+          oddysseyReady: 0,
+          message: 'Fallback: Today\'s fixtures only (due to timeout)'
+        };
+      } catch (fallbackError) {
+        console.error('❌ Fallback fixtures fetch also failed:', fallbackError);
+        throw error; // Throw original error
+      }
     }
   }
 
@@ -206,26 +233,37 @@ class CoordinatedFixturesScheduler {
   }
 
   /**
-   * Update live results
+   * Update live results (optimized)
    */
   async updateLiveResults() {
     console.log('⚽ Starting live results update...');
     
     try {
-      // Get live and recently finished fixtures
-      const result = await this.sportmonksService.fetchLiveResults();
+      // Update fixture status for live matches with timeout protection
+      const result = await Promise.race([
+        this.sportmonksService.updateFixtureStatus(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Live results update timeout after 5 minutes')), 5 * 60 * 1000)
+        )
+      ]);
       
-      console.log(`✅ Updated ${result.length} live results`);
+      console.log(`✅ Updated ${result.updated || 0} live results`);
       
       return {
         success: true,
-        resultsCount: result.length,
+        resultsCount: result.updated || 0,
         message: 'Live results update completed'
       };
       
     } catch (error) {
       console.error('❌ Live results update failed:', error);
-      throw error;
+      
+      // Don't throw error for live results - it's not critical
+      return {
+        success: false,
+        resultsCount: 0,
+        message: `Live results update failed: ${error.message}`
+      };
     }
   }
 
@@ -287,11 +325,11 @@ class CoordinatedFixturesScheduler {
       const jobStatuses = {};
       
       for (const [jobName] of this.jobs) {
-        const lockStatus = await cronCoordinator.getLockStatus(jobName);
+        const isLocked = await cronCoordinator.isLocked(jobName);
         jobStatuses[jobName] = {
           scheduled: true,
-          locked: lockStatus.isLocked,
-          lastRun: lockStatus.lastExecution
+          locked: isLocked,
+          lastRun: null // We can add this later if needed
         };
       }
       

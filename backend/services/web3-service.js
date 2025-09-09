@@ -2,6 +2,7 @@ const { ethers } = require('ethers');
 const path = require('path');
 const config = require('../config');
 const GasEstimator = require('../utils/gas-estimator');
+const MonadGasOptimizer = require('../utils/monad-gas-optimizer');
 
 class Web3Service {
   // Contract constants
@@ -42,39 +43,25 @@ class Web3Service {
     this.optimisticOracleContract = null;
     this.bitrTokenContract = null;
     this.gasEstimator = null;
+    this.monadGasOptimizer = new MonadGasOptimizer();
     this.isInitialized = false;
-    
-    // Monad-specific gas settings
-    this.monadGasSettings = {
-      baseFee: config.blockchain.monad.baseFee,
-      priorityFee: config.blockchain.monad.priorityFee,
-      maxGasLimit: config.blockchain.monad.maxGasLimit,
-      gasCharging: config.blockchain.monad.gasCharging, // 'gas_limit'
-    };
   }
 
   /**
    * Get Monad-optimized gas settings for transactions
    * @param {number} estimatedGas - Estimated gas from ethers
+   * @param {string} operationType - Type of operation (placeSlip, evaluateSlip, etc.)
    * @returns {Object} Gas settings optimized for Monad
    */
-  getMonadGasSettings(estimatedGas) {
-    // Add 20% buffer but stay within Monad limits
-    const gasLimit = Math.min(
-      Math.floor(estimatedGas * 1.2),
-      this.monadGasSettings.maxGasLimit
-    );
-    
-    const baseFee = BigInt(this.monadGasSettings.baseFee);
-    const priorityFee = BigInt(this.monadGasSettings.priorityFee);
-    
-    return {
-      gasLimit,
-      maxFeePerGas: baseFee + priorityFee,
-      maxPriorityFeePerGas: priorityFee,
-      // Note: Monad charges gas_limit, not gas_used
-      estimatedCost: ethers.formatEther(BigInt(gasLimit) * (baseFee + priorityFee))
-    };
+  getMonadGasSettings(estimatedGas, operationType = 'standard') {
+    return this.monadGasOptimizer.getOptimizedGasSettings(estimatedGas, operationType);
+  }
+
+  /**
+   * Get fallback gas settings when estimation fails
+   */
+  getFallbackGasSettings(operationType) {
+    return this.monadGasOptimizer.getFallbackGasSettings(operationType);
   }
 
   /**
@@ -117,9 +104,13 @@ class Web3Service {
         console.warn('⚠️ Web3Service initialized without wallet (PRIVATE_KEY not set)');
       }
 
-      // Initialize gas estimator with BitredictPool contract for guided markets
-      const bitredictPoolContract = await this.getBitredictPoolContract();
-      this.gasEstimator = new GasEstimator(this.provider, bitredictPoolContract);
+      // Initialize gas estimator with BitrPool contract for guided markets
+      this.bitrPoolContract = new ethers.Contract(
+        config.blockchain.contractAddresses.bitrPool,
+        this.getBitrPoolABI(),
+        this.provider
+      );
+      this.gasEstimator = new GasEstimator(this.provider, this.bitrPoolContract, this.monadGasOptimizer.settings);
       
       this.isInitialized = true;
       console.log('✅ Web3Service fully initialized');
@@ -295,22 +286,22 @@ class Web3Service {
       throw new Error('BITR_TOKEN_ADDRESS environment variable not set');
     }
 
-    let BitredictTokenABI;
+    let BitrTokenABI;
     try {
       // Try multiple possible paths for the ABI (Docker container paths)
       const possiblePaths = [
-        './solidity/artifacts/contracts/BitredictToken.sol/BitredictToken.json',
-        '../solidity/artifacts/contracts/BitredictToken.sol/BitredictToken.json',
-        '../../solidity/artifacts/contracts/BitredictToken.sol/BitredictToken.json',
-        path.join(__dirname, '../solidity/artifacts/contracts/BitredictToken.sol/BitredictToken.json'),
-        path.join(__dirname, '../../solidity/artifacts/contracts/BitredictToken.sol/BitredictToken.json')
+        './solidity/artifacts/contracts/BitrToken.sol/BitrToken.json',
+        '../solidity/artifacts/contracts/BitrToken.sol/BitrToken.json',
+        '../../solidity/artifacts/contracts/BitrToken.sol/BitrToken.json',
+        path.join(__dirname, '../solidity/artifacts/contracts/BitrToken.sol/BitrToken.json'),
+        path.join(__dirname, '../../solidity/artifacts/contracts/BitrToken.sol/BitrToken.json')
       ];
       
       let abiLoaded = false;
       for (const abiPath of possiblePaths) {
         try {
-          BitredictTokenABI = require(abiPath).abi;
-          console.log(`✅ BitredictToken ABI loaded from: ${abiPath}`);
+          BitrTokenABI = require(abiPath).abi;
+          console.log(`✅ BitrToken ABI loaded from: ${abiPath}`);
           abiLoaded = true;
           break;
         } catch (pathError) {
@@ -322,8 +313,8 @@ class Web3Service {
         throw new Error('Could not load ABI from any path');
       }
     } catch (error) {
-      console.warn('⚠️ BitredictToken contract artifacts not found, using fallback ABI');
-      BitredictTokenABI = [
+      console.warn('⚠️ BitrToken contract artifacts not found, using fallback ABI');
+      BitrTokenABI = [
         "function balanceOf(address owner) external view returns (uint256)",
         "function allowance(address owner, address spender) external view returns (uint256)",
         "function approve(address spender, uint256 amount) external returns (bool)",
@@ -335,18 +326,18 @@ class Web3Service {
     if (!this.wallet) {
       throw new Error('Wallet not initialized - BITR Token contract requires write operations');
     }
-    this.bitrTokenContract = new ethers.Contract(contractAddress, BitredictTokenABI, this.wallet);
+    this.bitrTokenContract = new ethers.Contract(contractAddress, BitrTokenABI, this.wallet);
     
     console.log('✅ BITR Token contract initialized:', contractAddress);
     return this.bitrTokenContract;
   }
 
   /**
-   * Get BitredictPool contract instance
+   * Get BitrPool contract instance
    */
-  async getBitredictPoolContract() {
-    if (this.bitredictPoolContract) {
-      return this.bitredictPoolContract;
+  async getBitrPoolContract() {
+    if (this.bitrPoolContract) {
+      return this.bitrPoolContract;
     }
 
     const contractAddress = process.env.BITREDICT_POOL_ADDRESS;
@@ -354,22 +345,22 @@ class Web3Service {
       throw new Error('BITREDICT_POOL_ADDRESS environment variable not set');
     }
 
-    let BitredictPoolABI;
+    let BitrPoolABI;
     try {
       // Try multiple possible paths for the ABI (Docker container paths)
       const possiblePaths = [
-        './solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-        '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-        '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-        path.join(__dirname, '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json'),
-        path.join(__dirname, '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json')
+        './solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+        '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+        '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+        path.join(__dirname, '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json'),
+        path.join(__dirname, '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json')
       ];
       
       let abiLoaded = false;
       for (const abiPath of possiblePaths) {
         try {
-          BitredictPoolABI = require(abiPath).abi;
-          console.log(`✅ BitredictPool ABI loaded from: ${abiPath}`);
+          BitrPoolABI = require(abiPath).abi;
+          console.log(`✅ BitrPool ABI loaded from: ${abiPath}`);
           abiLoaded = true;
           break;
         } catch (pathError) {
@@ -381,9 +372,9 @@ class Web3Service {
         throw new Error('Could not load ABI from any path');
       }
     } catch (error) {
-      console.warn('⚠️ BitredictPool contract artifacts not found, using fallback ABI');
-      // Complete fallback ABI matching actual BitredictPool contract
-      BitredictPoolABI = [
+      console.warn('⚠️ BitrPool contract artifacts not found, using fallback ABI');
+      // Complete fallback ABI matching actual BitrPool contract
+      BitrPoolABI = [
         // Core pool functions
         "function createPool(bytes32 _predictedOutcome, uint256 _odds, uint256 _creatorStake, uint256 _eventStartTime, uint256 _eventEndTime, string memory _league, string memory _category, string memory _region, bool _isPrivate, uint256 _maxBetPerUser, bool _useBitr, uint8 _oracleType, bytes32 _marketId) external payable",
         "function placeBet(uint256 poolId, uint256 amount) external payable",
@@ -484,12 +475,12 @@ class Web3Service {
     
     // BitredictPool needs write operations, so require wallet
     if (!this.wallet) {
-      throw new Error('Wallet not initialized - BitredictPool contract requires write operations');
+      throw new Error('Wallet not initialized - BitrPool contract requires write operations');
     }
-    this.bitredictPoolContract = new ethers.Contract(contractAddress, BitredictPoolABI, this.wallet);
+    this.bitrPoolContract = new ethers.Contract(contractAddress, BitrPoolABI, this.wallet);
     
-    console.log('✅ BitredictPool contract initialized:', contractAddress);
-    return this.bitredictPoolContract;
+    console.log('✅ BitrPool contract initialized:', contractAddress);
+    return this.bitrPoolContract;
   }
 
   /**
@@ -1197,42 +1188,47 @@ class Web3Service {
       const entryFee = await contract.entryFee();
       console.log(`💰 Entry fee: ${ethers.formatEther(entryFee)} STT`);
       
-      // Use gas estimator for robust gas estimation
-      const gasEstimate = await this.gasEstimator.estimateGasWithFallback('placeSlip', [formattedPredictions], {
-        value: entryFee,
-        buffer: 30, // 30% buffer
-        ...options
-      });
-      
-      if (gasEstimate.error) {
-        throw new Error(`Gas estimation failed: ${gasEstimate.error}`);
+      // Use Monad-optimized gas estimation
+      let gasSettings;
+      try {
+        const estimatedGas = await contract.placeSlip.estimateGas(formattedPredictions, { value: entryFee });
+        gasSettings = this.getMonadGasSettings(estimatedGas, 'placeSlip');
+        console.log(`⛽ Estimated gas: ${estimatedGas.toString()}`);
+      } catch (gasError) {
+        console.warn('⚠️ Gas estimation failed, using fallback settings:', gasError.message);
+        gasSettings = this.getFallbackGasSettings('placeSlip');
       }
       
-      console.log(`⛽ Gas estimation method: ${gasEstimate.method}`);
-      console.log(`⛽ Estimated gas: ${gasEstimate.estimate.toString()}`);
-      console.log(`⛽ Gas limit with buffer: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} STT`);
+      // Validate gas settings
+      this.monadGasOptimizer.validateGasSettings(gasSettings);
+      
+      // Calculate total cost including entry fee
+      const costEstimate = this.monadGasOptimizer.estimateTransactionCost(gasSettings, entryFee);
+      
+      console.log(`⛽ Gas limit: ${gasSettings.gasLimit.toString()}`);
+      console.log(`💰 Gas cost: ${costEstimate.gasCostEth} STT`);
+      console.log(`💰 Entry fee: ${costEstimate.valueEth} STT`);
+      console.log(`💰 Total cost: ${costEstimate.totalCostEth} STT`);
+      console.log(`⚠️ ${gasSettings.warning}`);
       
       // Check balance
       const walletAddress = this.getWalletAddress();
-      const balanceCheck = await this.gasEstimator.checkBalance(walletAddress, gasEstimate.totalCost);
+      const balance = await this.provider.getBalance(walletAddress);
       
-      if (!balanceCheck.hasSufficientBalance) {
-        throw new Error(`Insufficient balance. Need ${ethers.formatEther(balanceCheck.totalCost)} STT, have ${ethers.formatEther(balanceCheck.balance)} STT`);
+      if (balance < costEstimate.totalCost) {
+        throw new Error(`Insufficient balance. Need ${costEstimate.totalCostEth} STT, have ${ethers.formatEther(balance)} STT`);
       }
       
-      // Get optimal gas price
-      const gasPriceData = await this.gasEstimator.getOptimalGasPrice();
-      
-      // Place slip with enhanced gas settings
+      // Place slip with Monad-optimized gas settings
       const txParams = {
         value: entryFee,
-        gasLimit: gasEstimate.gasLimit,
-        ...gasPriceData
+        gasLimit: gasSettings.gasLimit,
+        maxFeePerGas: gasSettings.maxFeePerGas,
+        maxPriorityFeePerGas: gasSettings.maxPriorityFeePerGas
       };
       
-      console.log(`🚀 Placing slip with gas limit: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Gas price type: ${gasPriceData.type}`);
+      console.log(`🚀 Placing slip with Monad-optimized gas settings`);
+      console.log(`⛽ Operation type: ${gasSettings.operationType}`);
       
       const tx = await contract.placeSlip(formattedPredictions, txParams);
       
@@ -1260,40 +1256,44 @@ class Web3Service {
       
       const contract = await this.getOddysseyContract();
       
-      // Use gas estimator for robust gas estimation
-      const gasEstimate = await this.gasEstimator.estimateGasWithFallback('evaluateSlip', [slipId], {
-        buffer: 30, // 30% buffer
-        ...options
-      });
-      
-      if (gasEstimate.error) {
-        throw new Error(`Gas estimation failed: ${gasEstimate.error}`);
+      // Use Monad-optimized gas estimation
+      let gasSettings;
+      try {
+        const estimatedGas = await contract.evaluateSlip.estimateGas(slipId);
+        gasSettings = this.getMonadGasSettings(estimatedGas, 'evaluateSlip');
+        console.log(`⛽ Estimated gas: ${estimatedGas.toString()}`);
+      } catch (gasError) {
+        console.warn('⚠️ Gas estimation failed, using fallback settings:', gasError.message);
+        gasSettings = this.getFallbackGasSettings('evaluateSlip');
       }
       
-      console.log(`⛽ Gas estimation method: ${gasEstimate.method}`);
-      console.log(`⛽ Estimated gas: ${gasEstimate.estimate.toString()}`);
-      console.log(`⛽ Gas limit with buffer: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} STT`);
+      // Validate gas settings
+      this.monadGasOptimizer.validateGasSettings(gasSettings);
+      
+      // Calculate total cost
+      const costEstimate = this.monadGasOptimizer.estimateTransactionCost(gasSettings);
+      
+      console.log(`⛽ Gas limit: ${gasSettings.gasLimit.toString()}`);
+      console.log(`💰 Total cost: ${costEstimate.totalCostEth} STT`);
+      console.log(`⚠️ ${gasSettings.warning}`);
       
       // Check balance
       const walletAddress = this.getWalletAddress();
-      const balanceCheck = await this.gasEstimator.checkBalance(walletAddress, gasEstimate.totalCost);
+      const balance = await this.provider.getBalance(walletAddress);
       
-      if (!balanceCheck.hasSufficientBalance) {
-        throw new Error(`Insufficient balance for evaluation. Need ${ethers.formatEther(balanceCheck.totalCost)} STT, have ${ethers.formatEther(balanceCheck.balance)} STT`);
+      if (balance < costEstimate.totalCost) {
+        throw new Error(`Insufficient balance for evaluation. Need ${costEstimate.totalCostEth} STT, have ${ethers.formatEther(balance)} STT`);
       }
       
-      // Get optimal gas price
-      const gasPriceData = await this.gasEstimator.getOptimalGasPrice();
-      
-      // Execute evaluation with enhanced gas settings
+      // Execute evaluation with Monad-optimized gas settings
       const txParams = {
-        gasLimit: gasEstimate.gasLimit,
-        ...gasPriceData
+        gasLimit: gasSettings.gasLimit,
+        maxFeePerGas: gasSettings.maxFeePerGas,
+        maxPriorityFeePerGas: gasSettings.maxPriorityFeePerGas
       };
       
-      console.log(`🚀 Evaluating slip ${slipId} with gas limit: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Gas price type: ${gasPriceData.type}`);
+      console.log(`🚀 Evaluating slip ${slipId} with Monad-optimized gas settings`);
+      console.log(`⛽ Operation type: ${gasSettings.operationType}`);
       
       const tx = await contract.evaluateSlip(slipId, txParams);
       
@@ -1732,7 +1732,7 @@ class Web3Service {
    */
   async createPool(poolData, options = {}) {
     try {
-      const contract = await this.getBitredictPoolContract();
+      const contract = await this.getBitrPoolContract();
       
       const {
         predictedOutcome,
@@ -1840,7 +1840,7 @@ class Web3Service {
    */
   async placeBet(poolId, amount, options = {}) {
     try {
-      const contract = await this.getBitredictPoolContract();
+      const contract = await this.getBitrPoolContract();
       
       // Get pool info to check token type
       const pool = await contract.pools(poolId);
@@ -1911,7 +1911,7 @@ class Web3Service {
    */
   async addLiquidity(poolId, amount, options = {}) {
     try {
-      const contract = await this.getBitredictPoolContract();
+      const contract = await this.getBitrPoolContract();
       
       // Get pool info to check token type
       const pool = await contract.pools(poolId);
@@ -1982,7 +1982,7 @@ class Web3Service {
    */
   async settlePool(poolId, outcome, options = {}) {
     try {
-      const contract = await this.getBitredictPoolContract();
+      const contract = await this.getBitrPoolContract();
       
       const tx = await contract.settlePool(
         poolId, 
@@ -2006,7 +2006,7 @@ class Web3Service {
    */
   async claimPoolRewards(poolId, options = {}) {
     try {
-      const contract = await this.getBitredictPoolContract();
+      const contract = await this.getBitrPoolContract();
       
       const tx = await contract.claim(poolId, {
         gasLimit: options.gasLimit || 400000,
@@ -2026,7 +2026,7 @@ class Web3Service {
    */
   async boostPool(poolId, tier, options = {}) {
     try {
-      const contract = await this.getBitredictPoolContract();
+      const contract = await this.getBitrPoolContract();
       
       // Get boost fee
       const boostFee = await contract.boostFees(tier);
@@ -2437,7 +2437,7 @@ class Web3Service {
   async getContractStatus() {
     try {
       const oddysseyContract = await this.getOddysseyContract();
-      const poolContract = await this.getBitredictPoolContract();
+      const poolContract = await this.getBitrPoolContract();
       
       const [
         currentCycle,
@@ -2546,6 +2546,32 @@ class Web3Service {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Get BitrPool contract ABI
+   */
+  getBitrPoolABI() {
+    return [
+      // Core functions
+      "function createGuidedPool(tuple(uint8 marketType, bytes32 marketId, uint256 endTime, uint256 entryFee, uint256 maxParticipants, string memory description) memory _poolData) external",
+      "function createOpenPool(tuple(uint8 marketType, bytes32 marketId, uint256 endTime, uint256 entryFee, uint256 maxParticipants, string memory description) memory _poolData) external",
+      "function joinPool(uint256 _poolId, uint8 _prediction) external payable",
+      "function resolvePool(uint256 _poolId, uint8 _outcome) external",
+      "function claimReward(uint256 _poolId) external",
+      
+      // View functions
+      "function getPool(uint256 _poolId) external view returns (tuple(uint8 marketType, bytes32 marketId, uint256 endTime, uint256 entryFee, uint256 maxParticipants, string memory description, address creator, uint8 state, uint256 totalStake, uint256 participantCount, uint8 winningOutcome, uint256 createdAt))",
+      "function getUserPools(address _user) external view returns (uint256[] memory)",
+      "function getPoolParticipants(uint256 _poolId) external view returns (address[] memory)",
+      "function getPoolStakes(uint256 _poolId) external view returns (uint256[] memory)",
+      
+      // Events
+      "event PoolCreated(uint256 indexed poolId, address indexed creator, uint8 marketType, bytes32 marketId, uint256 endTime, uint256 entryFee, uint256 maxParticipants)",
+      "event PoolJoined(uint256 indexed poolId, address indexed participant, uint8 prediction, uint256 stake)",
+      "event PoolResolved(uint256 indexed poolId, uint8 outcome, uint256 totalStake, uint256 winnerCount)",
+      "event RewardClaimed(uint256 indexed poolId, address indexed participant, uint256 reward)"
+    ];
   }
 }
 

@@ -10,6 +10,7 @@ const AirdropEligibilityCalculator = require('../airdrop/eligibility_calculator'
 const db = require('../db/monitored-db'); // Use monitored database wrapper
 const analyticsRouter = require('./analytics');
 const socialRouter = require('./social');
+const adminRouter = require('./admin');
 
 // Import health monitoring components
 const healthMonitor = require('../services/health-monitor');
@@ -102,8 +103,46 @@ class BitredictAPI {
     // Trust proxy for Fly.io - but be more specific
     this.app.set('trust proxy', 1);
     
-    // CORS
-    this.app.use(cors(config.api.cors));
+    // Enhanced CORS with logging
+    this.app.use(cors({
+      ...config.api.cors,
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, etc.)
+        if (!origin) return callback(null, true);
+        
+        const allowedOrigins = config.api.cors.origin;
+        console.log(`🌐 CORS check: Origin "${origin}" against allowed: [${allowedOrigins.join(', ')}]`);
+        
+        if (allowedOrigins.includes(origin)) {
+          console.log(`✅ CORS: Origin "${origin}" allowed`);
+          return callback(null, true);
+        } else {
+          console.log(`❌ CORS: Origin "${origin}" blocked`);
+          return callback(new Error('Not allowed by CORS'), false);
+        }
+      }
+    }));
+
+    // Additional explicit OPTIONS handler for preflight requests
+    this.app.options('*', (req, res) => {
+      const origin = req.headers.origin;
+      const allowedOrigins = config.api.cors.origin;
+      
+      console.log(`🔄 Preflight OPTIONS request from origin: ${origin}`);
+      
+      if (!origin || allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin || '*');
+        res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS,PATCH');
+        res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,X-API-Key,Accept,Origin,Access-Control-Request-Method,Access-Control-Request-Headers');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.header('Access-Control-Max-Age', '86400');
+        console.log(`✅ Preflight response sent for origin: ${origin}`);
+        return res.status(200).end();
+      } else {
+        console.log(`❌ Preflight blocked for origin: ${origin}`);
+        return res.status(403).end();
+      }
+    });
 
     // Rate limiting with proper configuration
     const limiter = rateLimit({
@@ -145,6 +184,9 @@ class BitredictAPI {
   }
 
   setupRoutes() {
+    // Admin routes (protected with admin key)
+    this.app.use('/api/admin', adminRouter);
+    
     // Comprehensive health monitoring routes
     this.app.use('/api/health', healthRoutes);
     
@@ -216,7 +258,7 @@ class BitredictAPI {
     // Reputation routes
     this.app.use('/api/reputation', reputationRoutes);
     
-    // Analytics routes  
+    // Analytics routes
     this.app.use('/api/analytics', analyticsRouter);
 
     // Matches routes
@@ -230,6 +272,7 @@ class BitredictAPI {
     
     // Pools routes (new optimized endpoints)
     this.app.use('/api/pools', require('./pools'));
+    this.app.use('/api/pools', require('./pools-social')); // Social pool features
 
     // Airdrop routes (NEW)
     this.app.use('/api/airdrop', require('./airdrop'));
@@ -2007,6 +2050,33 @@ class BitredictAPI {
         error: error.message,
         operation: 'update_fixture_status'
       });
+    }
+  }
+
+  async start() {
+    try {
+      console.log('🚀 Starting Bitr Backend API...');
+      
+      // Initialize all services
+      await this.initializeServices();
+      
+      // Start the HTTP server
+      const port = config.api.port || 3000;
+      this.server = this.app.listen(port, '0.0.0.0', () => {
+        console.log(`✅ Bitr Backend API server running on http://0.0.0.0:${port}`);
+        console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`🔗 Health check: http://0.0.0.0:${port}/api/health`);
+      });
+      
+      // Handle server errors
+      this.server.on('error', (error) => {
+        console.error('❌ Server error:', error);
+        throw error;
+      });
+      
+    } catch (error) {
+      console.error('❌ Failed to start server:', error);
+      throw error;
     }
   }
 }

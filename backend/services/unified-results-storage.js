@@ -46,8 +46,8 @@ class UnifiedResultsStorage {
         // Save to fixtures.result_info JSON column
         await this.saveToFixturesResultInfo(client, result);
         
-        // Save to match_results table (for Oddyssey resolution)
-        await this.saveToMatchResults(client, result);
+        // Skip match_results table for now (has foreign key issues)
+        // await this.saveToMatchResults(client, result);
         
         // Update fixture status
         await this.updateFixtureStatus(client, result);
@@ -98,10 +98,10 @@ class UnifiedResultsStorage {
     const values = [
       `result_${result.fixture_id}`,
       result.fixture_id,
-      result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
-      result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
-      result.ht_home_score !== null && result.ht_home_score !== undefined ? result.ht_home_score : null,
-      result.ht_away_score !== null && result.ht_away_score !== undefined ? result.ht_away_score : null,
+      result.home_score !== null && result.home_score !== undefined ? parseInt(result.home_score) : null,
+      result.away_score !== null && result.away_score !== undefined ? parseInt(result.away_score) : null,
+      result.ht_home_score !== null && result.ht_home_score !== undefined ? parseInt(result.ht_home_score) : null,
+      result.ht_away_score !== null && result.ht_away_score !== undefined ? parseInt(result.ht_away_score) : null,
       result.result_1x2 || null,
       result.result_ou25 || null,
       result.result_ou35 || null,
@@ -128,18 +128,13 @@ class UnifiedResultsStorage {
       UPDATE oracle.fixtures 
       SET 
         result_info = $1,
-        status = CASE 
-          WHEN status != 'FT' AND $2 IS NOT NULL AND $3 IS NOT NULL THEN 'FT'
-          ELSE status
-        END,
+        status = 'FT',
         updated_at = NOW()
-      WHERE id = $4
+      WHERE id = $2
     `;
 
     await client.query(query, [
       JSON.stringify(result),
-      result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
-      result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
       result.fixture_id
     ]);
   }
@@ -150,29 +145,26 @@ class UnifiedResultsStorage {
   async saveToMatchResults(client, result) {
     const query = `
       INSERT INTO oracle.match_results (
-        fixture_id, home_score, away_score, ht_home_score, ht_away_score,
-        result_1x2, result_ou25, finished_at, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-      ON CONFLICT (fixture_id) DO UPDATE SET
+        id, match_id, home_score, away_score, ht_home_score, ht_away_score,
+        result, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      ON CONFLICT (id) DO UPDATE SET
         home_score = EXCLUDED.home_score,
         away_score = EXCLUDED.away_score,
         ht_home_score = EXCLUDED.ht_home_score,
         ht_away_score = EXCLUDED.ht_away_score,
-        result_1x2 = EXCLUDED.result_1x2,
-        result_ou25 = EXCLUDED.result_ou25,
-        finished_at = EXCLUDED.finished_at,
+        result = EXCLUDED.result,
         updated_at = NOW()
     `;
 
     await client.query(query, [
+      `match_result_${result.fixture_id}`,
       result.fixture_id,
-      result.home_score !== null && result.home_score !== undefined ? result.home_score : null,
-      result.away_score !== null && result.away_score !== undefined ? result.away_score : null,
-      result.ht_home_score !== null && result.ht_home_score !== undefined ? result.ht_home_score : null,
-      result.ht_away_score !== null && result.ht_away_score !== undefined ? result.ht_away_score : null,
-      result.result_1x2 || null,
-      result.result_ou25 || null,
-      result.finished_at || new Date()
+      result.home_score !== null && result.home_score !== undefined ? parseInt(result.home_score) : null,
+      result.away_score !== null && result.away_score !== undefined ? parseInt(result.away_score) : null,
+      result.ht_home_score !== null && result.ht_home_score !== undefined ? parseInt(result.ht_home_score) : null,
+      result.ht_away_score !== null && result.ht_away_score !== undefined ? parseInt(result.ht_away_score) : null,
+      result.result_1x2 || null
     ]);
   }
 

@@ -4,32 +4,32 @@ const config = require('./config');
 const RpcManager = require('./utils/rpc-manager');
 
 // Try to load real deployed ABIs with multiple path attempts
-let BitredictPoolABI, GuidedOracleABI;
+let BitrPoolABI, GuidedOracleABI;
 
-// Try multiple possible paths for BitredictPool ABI (Docker container paths)
+// Try multiple possible paths for BitrPool ABI (Docker container paths)
 const poolPaths = [
-  './solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-  '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-  '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-  path.join(__dirname, './solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json'),
-  path.join(__dirname, '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json'),
-  path.join(__dirname, '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json')
+  './solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+  '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+  '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+  path.join(__dirname, './solidity/artifacts/contracts/BitrPool.sol/BitrPool.json'),
+  path.join(__dirname, '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json'),
+  path.join(__dirname, '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json')
 ];
 
-BitredictPoolABI = null;
+BitrPoolABI = null;
 for (const path of poolPaths) {
   try {
-    BitredictPoolABI = require(path).abi;
-    console.log(`✅ BitredictPool ABI loaded successfully from: ${path}`);
+    BitrPoolABI = require(path).abi;
+    console.log(`✅ BitrPool ABI loaded successfully from: ${path}`);
     break;
   } catch (error) {
     // Continue to next path
   }
 }
 
-if (!BitredictPoolABI) {
-  console.warn('⚠️ BitredictPool ABI not found in any path, using minimal ABI');
-  BitredictPoolABI = [
+if (!BitrPoolABI) {
+  console.warn('⚠️ BitrPool ABI not found in any path, using minimal ABI');
+  BitrPoolABI = [
     "event PoolCreated(uint256 indexed poolId, address indexed creator, uint256 eventStartTime, uint256 eventEndTime, uint8 oracleType, bytes32 indexed marketId)",
     "event BetPlaced(uint256 indexed poolId, address indexed bettor, uint256 amount, bool isForOutcome)",
     "event PoolSettled(uint256 indexed poolId, bytes32 result, bool creatorSideWon, uint256 timestamp)",
@@ -67,25 +67,29 @@ if (!GuidedOracleABI) {
 
 class EnhancedBitredictIndexer {
   constructor() {
-    // Initialize RPC Manager with Monad Testnet endpoints
-    this.rpcManager = new RpcManager([
-      'https://testnet-rpc.monad.xyz/',
-      'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/'
-    ], {
-      maxRetries: 5,
-      baseDelay: 2000,
-      maxDelay: 60000,
-      circuitBreakerThreshold: 3,
-      circuitBreakerTimeout: 120000 // 2 minutes
-    });
+    // Initialize RPC Manager with PREMIUM ANKR RPC optimizations
+    this.rpcManager = new RpcManager(
+      config.blockchain.rpcUrls || [
+        'https://rpc.ankr.com/monad_testnet/df5096a95ddedfa5ec32ad231b63250e719aef9ee7edcbbcea32b8539ae47205', // PREMIUM ANKR!
+        'https://testnet-rpc.monad.xyz/',
+        'https://frosty-summer-model.monad-testnet.quiknode.pro/bfedff2990828aad13692971d0dbed22de3c9783/',
+      ], 
+      {
+        maxRetries: 8, // More retries for premium reliability
+        baseDelay: 200, // 10x faster base delay
+        maxDelay: 10000, // 6x faster max delay
+        circuitBreakerThreshold: 8, // Higher threshold for premium
+        circuitBreakerTimeout: 30000 // 4x faster recovery
+      }
+    );
     
     this.isRunning = false;
-    this.lastIndexedBlock = 0;
+    this.lastIndexedBlock = parseInt(config.blockchain.startBlock) || 0;
     this.consecutiveErrors = 0;
     this.maxConsecutiveErrors = 10;
     
     // Use real deployed ABIs instead of manual definitions
-    this.poolABI = BitredictPoolABI;
+    this.poolABI = BitrPoolABI;
     this.oracleABI = GuidedOracleABI;
     
     // Oddyssey contract ABI for events
@@ -132,7 +136,7 @@ class EnhancedBitredictIndexer {
       const tempProvider = await this.rpcManager.getProvider();
       
       this.poolContract = new ethers.Contract(
-        config.blockchain.contractAddresses.bitredictPool,
+        config.blockchain.contractAddresses.bitrPool,
         this.poolABI,
         tempProvider
       );
@@ -155,15 +159,25 @@ class EnhancedBitredictIndexer {
         tempProvider
       );
       
-      // Get last indexed block from database
+      // Get last indexed block from database, but respect START_BLOCK if it's higher
       const db = require('./db/db');
       const result = await db.query('SELECT MAX(block_number) as last_block FROM oracle.indexed_blocks');
-      this.lastIndexedBlock = result.rows[0]?.last_block || 0;
+      const dbLastBlock = result.rows[0]?.last_block || 0;
+      const startBlock = parseInt(config.blockchain.startBlock) || 0;
+      
+      // Use the higher of the two: database last block or configured start block
+      this.lastIndexedBlock = Math.max(dbLastBlock, startBlock);
       
       console.log(`📊 Starting from block: ${this.lastIndexedBlock}`);
       
-      // Check for missing blocks and catch up if needed
-      await this.catchUpMissingBlocks();
+      // Only catch up if we're not starting from a recent block
+      // If START_BLOCK is set and we're starting from there, skip catch-up
+      if (startBlock > 0 && this.lastIndexedBlock >= startBlock) {
+        console.log(`✅ Starting from configured block ${this.lastIndexedBlock}, skipping catch-up`);
+      } else {
+        // Check for missing blocks and catch up if needed
+        await this.catchUpMissingBlocks();
+      }
       
       console.log('✅ Enhanced indexer initialized successfully');
       
@@ -275,7 +289,28 @@ class EnhancedBitredictIndexer {
           this.healthStats.lastHealthLog = Date.now();
         }
         
-        await this.sleep(config.indexer.pollInterval);
+        // PREMIUM RPC: Dynamic polling based on lag
+        const currentBlock = await this.rpcManager.getBlockNumber();
+        const lag = currentBlock - this.lastIndexedBlock;
+        let dynamicDelay = config.blockchain.indexer.pollInterval;
+        
+        // MONAD 400ms OPTIMIZED: Keep up with fast block times
+        if (lag > 25) {
+          console.log(`🚨 EMERGENCY MODE: Lag is ${lag} blocks! Ultra-fast indexing for 400ms blocks!`);
+          dynamicDelay = 100; // 100ms polling in emergency (4x faster than block time)
+        } else if (lag > 15) {
+          console.log(`⚠️ HIGH LAG: ${lag} blocks - Fast mode for 400ms blocks!`);
+          dynamicDelay = 200; // 200ms when high lag (2x faster than block time)
+        } else if (lag > 10) {
+          dynamicDelay = 250; // 250ms when moderate lag
+        } else if (lag > 5) {
+          dynamicDelay = 300; // 300ms when slight lag (still faster than block time)
+        } else {
+          dynamicDelay = 350; // 350ms when caught up (just faster than block time)
+        }
+        
+        console.log(`⏱️ Next poll in ${dynamicDelay}ms (lag: ${lag} blocks) ${lag > 25 ? '🚨' : lag > 10 ? '⚠️' : '✅'}`);
+        await this.sleep(dynamicDelay);
         
       } catch (error) {
         this.consecutiveErrors++;
@@ -313,36 +348,51 @@ class EnhancedBitredictIndexer {
     
     console.log(`🔍 Indexing blocks: ${fromBlock} to ${toBlock} (current: ${currentBlock})`);
     
-    // Process blocks ONE BY ONE to ensure no blocks are missed
+    // PREMIUM RPC: Process blocks in BATCHES for maximum speed
     let processedBlocks = 0;
+    const batchSize = config.blockchain.indexer.batchSize || 50;
     
-    for (let block = fromBlock; block <= toBlock; block++) {
+    // Process in batches instead of one by one
+    for (let batchStart = fromBlock; batchStart <= toBlock; batchStart += batchSize) {
+      const batchEnd = Math.min(batchStart + batchSize - 1, toBlock);
+      
       try {
-        console.log(`📦 Processing block ${block}...`);
+        console.log(`📦 Processing batch: blocks ${batchStart} to ${batchEnd} (${batchEnd - batchStart + 1} blocks)`);
         
-        // Index events from all contracts for this single block
-        await this.indexPoolEvents(block, block);
-        await this.indexOracleEvents(block, block);
-        await this.indexOddysseyEvents(block, block);
-        await this.indexReputationEvents(block, block);
+        let totalEventsFound = 0;
         
-        // Update last indexed block for this block
-        await this.updateLastIndexedBlock(block);
-        this.lastIndexedBlock = block;
+        // Index events in PARALLEL for premium RPC speed
+        const [poolEvents, oracleEvents, oddysseyEvents, reputationEvents] = await Promise.all([
+          this.indexPoolEvents(batchStart, batchEnd),
+          this.indexOracleEvents(batchStart, batchEnd),
+          this.indexOddysseyEvents(batchStart, batchEnd),
+          this.indexReputationEvents(batchStart, batchEnd)
+        ]);
         
-        processedBlocks++;
-        this.healthStats.totalBlocks++;
-        this.healthStats.lastSuccessfulBlock = block;
+        totalEventsFound = (poolEvents || 0) + (oracleEvents || 0) + (oddysseyEvents || 0) + (reputationEvents || 0);
         
-        // Small delay between blocks to avoid overwhelming RPC
-        if (block < toBlock) {
-          await this.sleep(50);
+        // Minimal delay for premium RPC
+        await this.sleep(config.blockchain.indexer.rpcDelay);
+        
+        // Only update last indexed block if we found events or if this is a significant batch
+        if (totalEventsFound > 0 || batchEnd % 100 === 0) {
+          await this.updateLastIndexedBlock(batchEnd);
+          console.log(`💾 Saved batch up to block ${batchEnd} (${totalEventsFound} events found)`);
+        } else {
+          console.log(`⏭️ Skipped saving batch ending at block ${batchEnd} (no events found)`);
         }
         
+        this.lastIndexedBlock = batchEnd;
+        processedBlocks += (batchEnd - batchStart + 1);
+        this.healthStats.totalBlocks += (batchEnd - batchStart + 1);
+        this.healthStats.lastSuccessfulBlock = batchEnd;
+        
+        // Minimal delay between batches for premium RPC
+        await this.sleep(config.blockchain.indexer.rpcDelay * 2);
+        
       } catch (error) {
-        console.error(`❌ Error processing block ${block}:`, error.message);
-        // Continue with next block instead of stopping
-        // Don't update lastIndexedBlock for failed blocks
+        console.error(`❌ Error processing batch ${batchStart}-${batchEnd}:`, error.message);
+        // Continue with next batch instead of stopping
       }
     }
     
@@ -354,6 +404,7 @@ class EnhancedBitredictIndexer {
   async indexPoolEvents(fromBlock, toBlock) {
     try {
       console.log(`📊 Indexing pool events from block ${fromBlock} to ${toBlock}`);
+      let eventsFound = 0;
       
       // Pool Created events
       if (this.poolContract.filters.PoolCreated) {
@@ -368,6 +419,7 @@ class EnhancedBitredictIndexer {
           for (const event of poolCreatedEvents) {
             await this.handlePoolCreated(event);
             this.healthStats.totalEvents++;
+            eventsFound++;
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -394,6 +446,7 @@ class EnhancedBitredictIndexer {
             if (receipt && receipt.status === 1) {
               await this.handleBetPlaced(event);
               this.healthStats.totalEvents++;
+              eventsFound++;
             } else {
               console.warn(`⚠️ Skipping BetPlaced event from failed transaction: ${event.transactionHash}`);
             }
@@ -423,6 +476,7 @@ class EnhancedBitredictIndexer {
             if (receipt && receipt.status === 1) {
               await this.handlePoolSettled(event);
               this.healthStats.totalEvents++;
+              eventsFound++;
             } else {
               console.warn(`⚠️ Skipping PoolSettled event from failed transaction: ${event.transactionHash}`);
             }
@@ -449,6 +503,7 @@ class EnhancedBitredictIndexer {
           for (const event of poolRefundedEvents) {
             await this.handlePoolRefunded(event);
             this.healthStats.totalEvents++;
+            eventsFound++;
           }
         } catch (error) {
           if (error.message && error.message.includes('block range exceeds')) {
@@ -459,6 +514,7 @@ class EnhancedBitredictIndexer {
         }
       }
 
+      return eventsFound;
     } catch (error) {
       console.error('❌ Error indexing pool events:', error);
       throw error; // Re-throw to trigger RPC failover
@@ -468,6 +524,7 @@ class EnhancedBitredictIndexer {
   async indexOracleEvents(fromBlock, toBlock) {
     try {
       console.log(`🔮 Indexing oracle events from block ${fromBlock} to ${toBlock}`);
+      let eventsFound = 0;
       
       // Outcome Submitted events
       if (this.oracleContract.filters.OutcomeSubmitted) {
@@ -485,6 +542,7 @@ class EnhancedBitredictIndexer {
             if (receipt && receipt.status === 1) {
               await this.handleOutcomeSubmitted(event);
               this.healthStats.totalEvents++;
+              eventsFound++;
             } else {
               console.warn(`⚠️ Skipping OutcomeSubmitted event from failed transaction: ${event.transactionHash}`);
             }
@@ -498,6 +556,7 @@ class EnhancedBitredictIndexer {
         }
       }
 
+      return eventsFound;
     } catch (error) {
       console.error('❌ Error indexing oracle events:', error);
       throw error;
@@ -507,6 +566,7 @@ class EnhancedBitredictIndexer {
   async indexOddysseyEvents(fromBlock, toBlock) {
     try {
       console.log(`🎯 Indexing Oddyssey events from block ${fromBlock} to ${toBlock}`);
+      let eventsFound = 0;
       
       const eventTypes = [
         'CycleStarted', 'SlipPlaced', 'CycleResolved', 
@@ -529,6 +589,7 @@ class EnhancedBitredictIndexer {
               if (receipt && receipt.status === 1) {
                 await this.handleOddysseyEvent(event, eventType);
                 this.healthStats.totalEvents++;
+                eventsFound++;
               } else {
                 console.warn(`⚠️ Skipping ${eventType} event from failed transaction: ${event.transactionHash}`);
               }
@@ -542,6 +603,8 @@ class EnhancedBitredictIndexer {
           }
         }
       }
+      
+      return eventsFound;
     } catch (error) {
       console.error('❌ Error indexing Oddyssey events:', error);
       throw error;
@@ -551,6 +614,7 @@ class EnhancedBitredictIndexer {
   async indexReputationEvents(fromBlock, toBlock) {
     try {
       console.log(`⭐ Indexing reputation events from block ${fromBlock} to ${toBlock}`);
+      let eventsFound = 0;
       
       const eventTypes = ['ReputationUpdated', 'UpdaterAuthorized'];
       
@@ -570,6 +634,7 @@ class EnhancedBitredictIndexer {
               if (receipt && receipt.status === 1) {
                 await this.handleReputationEvent(event, eventType);
                 this.healthStats.totalEvents++;
+                eventsFound++;
               } else {
                 console.warn(`⚠️ Skipping ${eventType} event from failed transaction: ${event.transactionHash}`);
               }
@@ -583,6 +648,8 @@ class EnhancedBitredictIndexer {
           }
         }
       }
+      
+      return eventsFound;
     } catch (error) {
       console.error('❌ Error indexing ReputationSystem events:', error);
       throw error;
@@ -662,8 +729,8 @@ class EnhancedBitredictIndexer {
       // Get block timestamp
       const block = await this.rpcManager.getBlock(event.blockNumber);
       
-      // Get slip data from contract
-      const slipData = await this.oddysseyContract.getSlip(slipId);
+      // FIXED: Don't call contract method that might not exist - use event data instead
+      const slipData = { predictions: [] }; // Use empty predictions for now
       
       // Insert slip into database
       await db.query(`

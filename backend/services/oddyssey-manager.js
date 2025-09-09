@@ -99,26 +99,75 @@ class OddysseyManager {
    */
   async getDailyMatches() {
     try {
-      console.log('🎯 Getting daily Oddyssey matches from persistent storage...');
+      console.log('🎯 Getting daily Oddyssey matches from oracle.matches table...');
 
       // Get today's date
       const today = new Date().toISOString().split('T')[0];
       
-      // Get pre-persisted matches from database
-      const result = await this.persistentManager.getDailyMatches(today);
+      // Get matches with odds from oracle.matches and oracle.fixture_odds tables
+      const result = await db.query(`
+        SELECT 
+          m.match_id,
+          m.home_team,
+          m.away_team,
+          m.match_time,
+          m.league,
+          m.status,
+          -- Get odds data from fixture_odds table
+          MAX(CASE WHEN o.market_id = '1' AND o.label = 'Home' THEN o.value END) as home_odds,
+          MAX(CASE WHEN o.market_id = '1' AND o.label = 'Draw' THEN o.value END) as draw_odds,
+          MAX(CASE WHEN o.market_id = '1' AND o.label = 'Away' THEN o.value END) as away_odds,
+          MAX(CASE WHEN o.market_id = '80' AND o.label = 'Over' AND o.total = '2.500000' THEN o.value END) as over_25_odds,
+          MAX(CASE WHEN o.market_id = '80' AND o.label = 'Under' AND o.total = '2.500000' THEN o.value END) as under_25_odds
+        FROM oracle.matches m
+        LEFT JOIN oracle.fixture_odds o ON m.match_id = o.fixture_id
+        WHERE DATE(m.match_time) >= $1
+        GROUP BY m.match_id, m.home_team, m.away_team, m.match_time, m.league, m.status
+        ORDER BY m.match_time ASC
+      `, [today]);
       
-      if (!result.success || result.matches.length === 0) {
-        throw new Error(`No pre-persisted matches found for ${today}. Matches must be selected before cycle creation.`);
+      if (result.rows.length === 0) {
+        throw new Error(`No matches found for ${today}. Matches must be selected before cycle creation.`);
       }
 
-      if (result.matches.length !== this.MATCHES_PER_CYCLE) {
-        throw new Error(`Expected ${this.MATCHES_PER_CYCLE} matches, found ${result.matches.length} for ${today}`);
+      if (result.rows.length !== this.MATCHES_PER_CYCLE) {
+        throw new Error(`Expected ${this.MATCHES_PER_CYCLE} matches, found ${result.rows.length} for ${today}`);
       }
 
-      // Convert database matches to contract format
-      const contractMatches = this.formatDatabaseMatchesForContract(result.matches);
+      // Convert database matches to contract format with odds
+      const contractMatches = result.rows.map(match => {
+        const startTime = Math.floor(new Date(match.match_time).getTime() / 1000);
+        
+        // Parse odds with fallbacks
+        let oddsHome = parseFloat(match.home_odds) || 1.5;
+        let oddsDraw = parseFloat(match.draw_odds) || 3.0;
+        let oddsAway = parseFloat(match.away_odds) || 2.5;
+        let oddsOver = parseFloat(match.over_25_odds) || 1.8;
+        let oddsUnder = parseFloat(match.under_25_odds) || 2.0;
+        
+        // Convert odds to contract format (scaled by 1000)
+        const oddsHomeScaled = Math.round(oddsHome * 1000);
+        const oddsDrawScaled = Math.round(oddsDraw * 1000);
+        const oddsAwayScaled = Math.round(oddsAway * 1000);
+        const oddsOverScaled = Math.round(oddsOver * 1000);
+        const oddsUnderScaled = Math.round(oddsUnder * 1000);
+
+        return {
+          id: BigInt(match.match_id),
+          startTime: startTime,
+          oddsHome: oddsHomeScaled,
+          oddsDraw: oddsDrawScaled,
+          oddsAway: oddsAwayScaled,
+          oddsOver: oddsOverScaled,
+          oddsUnder: oddsUnderScaled,
+          result: {
+            moneyline: 0, // NotSet
+            overUnder: 0  // NotSet
+          }
+        };
+      });
       
-      console.log(`✅ Retrieved ${contractMatches.length} pre-persisted matches for Oddyssey cycle`);
+      console.log(`✅ Retrieved ${contractMatches.length} matches for Oddyssey cycle`);
       return contractMatches;
 
     } catch (error) {

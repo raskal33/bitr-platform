@@ -137,15 +137,26 @@ class AirdropIndexer {
           
           console.log(`Indexing airdrop events: blocks ${this.lastIndexedBlock + 1} to ${endBlock}`);
           
-          await this.indexBITREvents(this.lastIndexedBlock + 1, endBlock);
-          await this.indexStakingEvents(this.lastIndexedBlock + 1, endBlock);
-          await this.indexFaucetEvents(this.lastIndexedBlock + 1, endBlock);
-          await this.indexPoolBITREvents(this.lastIndexedBlock + 1, endBlock);
+          // Index events and track counts
+          const bitrEvents = await this.indexBITREvents(this.lastIndexedBlock + 1, endBlock);
+          const stakingEvents = await this.indexStakingEvents(this.lastIndexedBlock + 1, endBlock);
+          const faucetEvents = await this.indexFaucetEvents(this.lastIndexedBlock + 1, endBlock);
+          const poolEvents = await this.indexPoolBITREvents(this.lastIndexedBlock + 1, endBlock);
           
-          // Update eligibility for affected users
-          await this.updateEligibilityCalculations();
+          const totalEvents = (bitrEvents || 0) + (stakingEvents || 0) + (faucetEvents || 0) + (poolEvents || 0);
           
-          this.lastIndexedBlock = endBlock;
+          // Only update lastIndexedBlock if we found events or if this is a checkpoint block
+          if (totalEvents > 0 || (endBlock % 100 === 0)) {
+            this.lastIndexedBlock = endBlock;
+            console.log(`💾 Updated lastIndexedBlock to ${endBlock} (${totalEvents} events found)`);
+            
+            // Update eligibility for affected users only when we have events
+            if (totalEvents > 0) {
+              await this.updateEligibilityCalculations();
+            }
+          } else {
+            console.log(`⏭️ Skipped updating lastIndexedBlock for blocks ${this.lastIndexedBlock + 1}-${endBlock} (no events found)`);
+          }
         }
         
         // Wait before next iteration
@@ -167,20 +178,24 @@ class AirdropIndexer {
         toBlock
       );
 
+      let processedEvents = 0;
       for (const event of transferEvents) {
         // CRITICAL FIX: Check transaction success before processing event
         const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
         if (receipt && receipt.status === 1) {
           await this.handleBITRTransfer(event);
+          processedEvents++;
         } else {
           console.warn(`⚠️ Skipping BITR Transfer event from failed transaction: ${event.transactionHash}`);
         }
       }
 
-      console.log(`Indexed ${transferEvents.length} BITR transfer events`);
+      console.log(`Indexed ${processedEvents} BITR transfer events`);
+      return processedEvents;
       
     } catch (error) {
       console.error('Error indexing BITR events:', error);
+      return 0;
     }
   }
 
@@ -237,10 +252,13 @@ class AirdropIndexer {
         }
       }
 
-      console.log(`Indexed ${stakedEvents.length + unstakedEvents.length + claimedEvents.length} staking events`);
+      const totalEvents = stakedEvents.length + unstakedEvents.length + claimedEvents.length;
+      console.log(`Indexed ${totalEvents} staking events`);
       
+      return totalEvents;
     } catch (error) {
       console.error('Error indexing staking events:', error);
+      return 0;
     }
   }
 
@@ -265,8 +283,10 @@ class AirdropIndexer {
 
       console.log(`Indexed ${faucetTransfers.length} faucet claim events`);
       
+      return faucetTransfers.length;
     } catch (error) {
       console.error('Error indexing faucet events:', error);
+      return 0;
     }
   }
 
@@ -306,10 +326,13 @@ class AirdropIndexer {
         }
       }
 
-      console.log(`Indexed ${poolBITREvents.length + betBITREvents.length} pool BITR events`);
+      const totalEvents = poolBITREvents.length + betBITREvents.length;
+      console.log(`Indexed ${totalEvents} pool BITR events`);
       
+      return totalEvents;
     } catch (error) {
       console.error('Error indexing pool BITR events:', error);
+      return 0;
     }
   }
 

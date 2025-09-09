@@ -44,13 +44,13 @@ router.post('/football', async (req, res) => {
     }
 
     // Validate stake amounts
-    const minStake = useBitr ? 1000 : 5; // 1000 BITR or 5 STT
+    const minStake = useBitr ? 1000 : 5; // 1000 BITR or 5 MON
     const maxStake = 1000000; // 1M tokens
 
     if (creatorStake < minStake) {
       return res.status(400).json({
         success: false,
-        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'STT'}`
+        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'MON'}`
       });
     }
 
@@ -208,13 +208,13 @@ router.post('/cryptocurrency', async (req, res) => {
     }
 
     // Validate stake amounts
-    const minStake = useBitr ? 1000 : 5; // 1000 BITR or 5 STT
+    const minStake = useBitr ? 1000 : 5; // 1000 BITR or 5 MON
     const maxStake = 1000000; // 1M tokens
 
     if (creatorStake < minStake) {
       return res.status(400).json({
         success: false,
-        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'STT'}`
+        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'MON'}`
       });
     }
 
@@ -828,13 +828,13 @@ router.post('/football/prepare', async (req, res) => {
     }
 
     // Validate stake amounts
-    const minStake = useBitr ? 1000 : 5; // 1000 BITR or 5 STT
+    const minStake = useBitr ? 1000 : 5; // 1000 BITR or 5 MON
     const maxStake = 1000000; // 1M tokens
 
     if (creatorStake < minStake) {
       return res.status(400).json({
         success: false,
-        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'STT'}`
+        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'MON'}`
       });
     }
 
@@ -879,10 +879,10 @@ router.post('/football/prepare', async (req, res) => {
 
     // Calculate total required amount including creation fee
     const creationFeeBITR = ethers.parseEther('50'); // 50 BITR creation fee
-    const creationFeeSTT = ethers.parseEther('1');   // 1 STT creation fee
+    const creationFeeMON = ethers.parseEther('1');   // 1 MON creation fee
     const totalRequiredWei = useBitr ? 
       stakeAmountWei + creationFeeBITR : // creatorStake + 50 BITR fee
-      stakeAmountWei + creationFeeSTT;   // creatorStake + 1 STT fee
+      stakeAmountWei + creationFeeMON;   // creatorStake + 1 MON fee
 
     // Hash predicted outcome
     const predictedOutcomeHash = ethers.keccak256(ethers.toUtf8Bytes(predictedOutcome));
@@ -900,7 +900,7 @@ router.post('/football/prepare', async (req, res) => {
         binarySelection: finalSelection.toUpperCase(), // The binary choice (OVER/UNDER, YES/NO, etc.)
         oddsDecimal: odds / 100,
         creatorStakeWei: stakeAmountWei.toString(),
-        paymentToken: useBitr ? 'BITR' : 'STT',
+        paymentToken: useBitr ? 'BITR' : 'MON',
         useBitr: useBitr,
         description: description,
         userPosition: predictedOutcome, // The exact user choice like "Over 2.5 goals"
@@ -930,10 +930,10 @@ router.post('/football/prepare', async (req, res) => {
         0, // GUIDED oracle type
         marketId
       ],
-      value: useBitr ? '0' : totalRequiredWei.toString(), // ETH value if using STT (includes fee)
+      value: useBitr ? '0' : totalRequiredWei.toString(), // ETH value if using MON (includes fee)
       gasEstimate: '9000000', // Updated gas estimate for pool creation (increased from 2M to 9M)
       totalRequiredWei: totalRequiredWei.toString(), // Total amount needed for approval/transfer
-      creationFeeWei: useBitr ? creationFeeBITR.toString() : creationFeeSTT.toString(), // Fee amount
+      creationFeeWei: useBitr ? creationFeeBITR.toString() : creationFeeMON.toString(), // Fee amount
       marketId: marketId, // ✅ FIXED: Include marketId in response so frontend has it
       marketDetails: {
         fixtureId,

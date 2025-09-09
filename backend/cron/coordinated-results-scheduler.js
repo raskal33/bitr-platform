@@ -1,6 +1,8 @@
 const cron = require('node-cron');
+const db = require('../db/db');
 const OddysseyResultsResolver = require('../services/oddyssey-results-resolver');
 const ResultsFetcherService = require('../services/results-fetcher-service');
+const ComprehensiveResultsProcessor = require('../services/comprehensive-results-processor');
 const cronCoordinator = require('../services/cron-coordinator');
 
 class CoordinatedResultsScheduler {
@@ -27,13 +29,15 @@ class CoordinatedResultsScheduler {
       // Initialize the coordinator
       await cronCoordinator.initialize();
 
-      // Initialize the results resolver and fetcher
+      // Initialize the results resolver, fetcher, and processor
       this.resolver = new OddysseyResultsResolver();
       this.resultsFetcher = new ResultsFetcherService();
+      this.resultsProcessor = new ComprehensiveResultsProcessor();
       
       // Schedule coordinated results fetching and resolution
       this.scheduleCoordinatedResultsFetching();
       this.scheduleCoordinatedResultsResolution();
+      this.scheduleFinishedFixturesProcessing();
       
       this.isRunning = true;
       console.log('✅ Coordinated Results Scheduler started successfully');
@@ -121,6 +125,68 @@ class CoordinatedResultsScheduler {
     });
 
     console.log('📅 Scheduled coordinated results resolution every 15 minutes');
+  }
+
+  /**
+   * Schedule finished fixtures processing
+   */
+  scheduleFinishedFixturesProcessing() {
+    // Run every 5 minutes to process finished fixtures
+    this.finishedFixturesJob = cron.schedule('*/5 * * * *', async () => {
+      if (!this.isRunning) return;
+      
+      await cronCoordinator.executeWithCoordination(
+        'finished-fixtures-processing',
+        () => this.processFinishedFixtures(),
+        {
+          lockTimeout: 5 * 60 * 1000, // 5 minutes timeout
+          retryAttempts: 1,
+          metadata: { 
+            description: 'Process finished fixtures and save results to all tables',
+            priority: 'high'
+          }
+        }
+      );
+    }, {
+      scheduled: true,
+      timezone: "UTC"
+    });
+
+    console.log('📅 Scheduled finished fixtures processing every 5 minutes');
+  }
+
+  /**
+   * Process finished fixtures and save results
+   */
+  async processFinishedFixtures() {
+    console.log('🔍 Starting finished fixtures processing...');
+    
+    const startTime = Date.now();
+    
+    try {
+      const result = await this.resultsProcessor.processFinishedFixtures();
+      
+      const executionTime = Date.now() - startTime;
+      
+      console.log(`✅ Finished fixtures processing completed: ${result.processed} processed, ${result.errors} errors`);
+      
+      return {
+        status: 'success',
+        processed: result.processed,
+        errors: result.errors,
+        executionTime
+      };
+      
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      console.error('❌ Finished fixtures processing failed:', error);
+      
+      return {
+        status: 'error',
+        error: error.message,
+        executionTime
+      };
+    }
   }
 
   /**

@@ -32,6 +32,109 @@ class SportMonksService {
   }
 
   /**
+   * Fetch fixtures for a specific date (fallback method)
+   */
+  async fetchFixturesForDate(dateStr) {
+    console.log(`📅 Fetching fixtures for ${dateStr}...`);
+    
+    try {
+      const response = await this.axios.get(`/fixtures/date/${dateStr}`, {
+        params: {
+          api_token: this.apiToken,
+          include: 'participants,league,venue,referee',
+          per_page: 100
+        }
+      });
+
+      const fixtures = response.data.data || [];
+      console.log(`📊 Found ${fixtures.length} fixtures for ${dateStr}`);
+      
+      if (fixtures.length === 0) {
+        return [];
+      }
+
+      // Save fixtures (simplified version for fallback)
+      let savedCount = 0;
+      for (const fixture of fixtures.slice(0, 20)) { // Limit to first 20 for speed
+        try {
+          const homeTeam = fixture.participants?.find(p => p.meta?.location === 'home');
+          const awayTeam = fixture.participants?.find(p => p.meta?.location === 'away');
+          await this.saveFixture(fixture, homeTeam, awayTeam);
+          savedCount++;
+        } catch (error) {
+          console.warn(`⚠️ Failed to save fixture ${fixture.id}:`, error.message);
+        }
+      }
+
+      console.log(`✅ Saved ${savedCount}/${fixtures.length} fixtures for ${dateStr}`);
+      return fixtures;
+      
+    } catch (error) {
+      console.error(`❌ Failed to fetch fixtures for ${dateStr}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update odds for upcoming fixtures
+   */
+  async updateOddsForUpcomingFixtures(startDate, endDate) {
+    console.log(`📊 Updating odds for fixtures between ${startDate} and ${endDate}...`);
+    
+    try {
+      // Get fixtures in the date range that need odds updates
+      const fixtures = await db.query(`
+        SELECT id, name, home_team, away_team, match_date
+        FROM oracle.fixtures 
+        WHERE match_date BETWEEN $1 AND $2
+        AND status IN ('NS', 'INPLAY_1ST_HALF', 'INPLAY_2ND_HALF', 'HT')
+        ORDER BY match_date ASC
+        LIMIT 50
+      `, [startDate, endDate]);
+
+      if (fixtures.rows.length === 0) {
+        console.log('📊 No fixtures found for odds update');
+        return { updatedCount: 0 };
+      }
+
+      console.log(`📊 Found ${fixtures.rows.length} fixtures for odds update`);
+      
+      let updatedCount = 0;
+      for (const fixture of fixtures.rows.slice(0, 10)) { // Limit to 10 for performance
+        try {
+          // Fetch fresh odds for this fixture
+          const oddsResponse = await this.axios.get(`/fixtures/${fixture.id}/odds`, {
+            params: {
+              api_token: this.apiToken,
+              include: 'bookmaker',
+              per_page: 50
+            }
+          });
+
+          const odds = oddsResponse.data.data || [];
+          if (odds.length > 0) {
+            // Save updated odds
+            const oddsCount = await this.saveOdds(fixture.id, odds);
+            if (oddsCount > 0) {
+              updatedCount++;
+              console.log(`✅ Updated ${oddsCount} odds for fixture ${fixture.id}`);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ Failed to update odds for fixture ${fixture.id}:`, error.message);
+        }
+      }
+
+      console.log(`✅ Odds update completed: ${updatedCount} fixtures updated`);
+      return { updatedCount };
+
+    } catch (error) {
+      console.error('❌ Error updating odds for upcoming fixtures:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Main function to fetch and save 7 days of fixtures
    */
   async fetchAndSave7DayFixtures() {
@@ -436,11 +539,10 @@ class SportMonksService {
         home_team_image_path, away_team_image_path, league_image_path, country_image_path,
         venue_id, state_id, result_info, leg,
         team_assignment_validated, odds_mapping_validated, processing_errors,
-        country, country_code,
         created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-        $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, NOW(), NOW()
+        $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, NOW(), NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
         home_team = EXCLUDED.home_team,
@@ -452,8 +554,6 @@ class SportMonksService {
         away_team_image_path = EXCLUDED.away_team_image_path,
         league_image_path = EXCLUDED.league_image_path,
         country_image_path = EXCLUDED.country_image_path,
-        country = EXCLUDED.country,
-        country_code = EXCLUDED.country_code,
         venue_capacity = EXCLUDED.venue_capacity,
         venue_coordinates = EXCLUDED.venue_coordinates,
         venue_surface = EXCLUDED.venue_surface,
@@ -546,9 +646,7 @@ class SportMonksService {
       fixture.leg ? parseInt(fixture.leg.toString().split('/')[0]) || null : null, // $38 - leg
       true, // $39 - team_assignment_validated
       true, // $40 - odds_mapping_validated
-      JSON.stringify({ processed_at: new Date().toISOString() }), // $41 - processing_errors
-      leagueCountry, // $42 - country
-      leagueCountryCode // $43 - country_code
+      JSON.stringify({ processed_at: new Date().toISOString() }) // $41 - processing_errors
     ];
     
 

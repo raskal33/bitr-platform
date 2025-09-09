@@ -412,6 +412,47 @@ class CronCoordinator {
   }
 
   /**
+   * Log execution status for a cron job
+   * @param {string} jobName - Name of the cron job
+   * @param {string} executionId - Execution ID
+   * @param {string} status - Status: 'started', 'completed', 'failed', 'timeout'
+   * @param {string} errorMessage - Error message if status is 'failed'
+   * @param {Object} metadata - Additional metadata
+   */
+  async logExecution(jobName, executionId, status, errorMessage = null, metadata = {}) {
+    try {
+      const now = new Date();
+      
+      if (status === 'started') {
+        // Insert new execution log entry
+        await db.query(`
+          INSERT INTO system.cron_execution_log 
+          (job_name, execution_id, status, started_at, metadata)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [jobName, executionId, status, now, JSON.stringify(metadata)]);
+      } else {
+        // Update existing execution log entry
+        const durationMs = status === 'completed' || status === 'failed' ? 
+          `EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000` : null;
+        
+        await db.query(`
+          UPDATE system.cron_execution_log 
+          SET status = $1, 
+              completed_at = $2,
+              duration_ms = ${durationMs ? `CAST(${durationMs} AS INTEGER)` : 'NULL'},
+              error_message = $3,
+              metadata = $4
+          WHERE job_name = $5 AND execution_id = $6 AND status = 'started'
+        `, [status, now, errorMessage, JSON.stringify(metadata), jobName, executionId]);
+      }
+      
+      console.log(`📝 Logged execution: ${jobName} - ${status} (${executionId})`);
+    } catch (error) {
+      console.error(`❌ Failed to log execution for ${jobName}:`, error);
+    }
+  }
+
+  /**
    * Force release a lock (emergency use only)
    * @param {string} jobName - Name of the cron job
    * @returns {Promise<boolean>} - True if lock was released

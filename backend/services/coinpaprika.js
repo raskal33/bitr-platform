@@ -156,7 +156,7 @@ class CoinpaprikaService {
       // Sort by rank
       popularData.sort((a, b) => (a.rank || 999) - (b.rank || 999));
 
-      return popularData.map(coin => ({
+      const processedData = popularData.map(coin => ({
         id: coin.id,
         name: coin.name,
         symbol: coin.symbol,
@@ -172,9 +172,19 @@ class CoinpaprikaService {
         prediction_difficulty: this.calculatePredictionDifficulty(coin),
         last_updated: coin.last_updated
       }));
+
+      return {
+        success: true,
+        data: processedData,
+        timestamp: new Date().toISOString()
+      };
     } catch (error) {
       console.error('Failed to fetch popular coins:', error);
-      return [];
+      return {
+        success: false,
+        error: error.message,
+        data: []
+      };
     }
   }
 
