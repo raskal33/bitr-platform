@@ -442,7 +442,7 @@ class Web3Service {
         "function optimisticOracle() external view returns (address)",
         "function creationFee() external view returns (uint256)",
         "function platformFee() external view returns (uint256)",
-        "function totalCollectedSTT() external view returns (uint256)",
+        "function totalCollectedMON() external view returns (uint256)",
         "function totalCollectedBITR() external view returns (uint256)",
         "function bettingGracePeriod() external view returns (uint256)",
         "function arbitrationTimeout() external view returns (uint256)",
@@ -496,7 +496,7 @@ class Web3Service {
       throw new Error('STAKING_CONTRACT_ADDRESS environment variable not set');
     }
 
-    let BitredictStakingABI;
+    let BitrStakingABI;
     try {
       // Try multiple possible paths for the ABI (Docker container paths)
       const possiblePaths = [
@@ -510,7 +510,7 @@ class Web3Service {
       let abiLoaded = false;
       for (const abiPath of possiblePaths) {
         try {
-          BitredictStakingABI = require(abiPath).abi;
+          BitrStakingABI = require(abiPath).abi;
           console.log(`✅ BitrStaking ABI loaded from: ${abiPath}`);
           abiLoaded = true;
           break;
@@ -525,7 +525,7 @@ class Web3Service {
     } catch (error) {
       console.warn('⚠️ BitrStaking contract artifacts not found, using fallback ABI');
       // Complete fallback ABI matching actual BitrStaking contract
-      BitredictStakingABI = [
+      BitrStakingABI = [
         // Core staking functions
         "function stake(uint256 _amount, uint8 _tierId, uint8 _durationOption) external",
         "function unstake(uint256 _index) external",
@@ -543,7 +543,7 @@ class Web3Service {
         
         // View functions - Core data
         "function bitrToken() external view returns (address)",
-        "function userStakes(address, uint256) external view returns (uint256 amount, uint256 startTime, uint8 tierId, uint8 durationOption, uint256 claimedRewardBITR, uint256 rewardDebtBITR, uint256 rewardDebtSTT)",
+        "function userStakes(address, uint256) external view returns (uint256 amount, uint256 startTime, uint8 tierId, uint8 durationOption, uint256 claimedRewardBITR, uint256 rewardDebtBITR, uint256 rewardDebtMON)",
         "function tiers(uint256) external view returns (uint256 baseAPY, uint256 minStake, uint256 revenueShareRate)",
         "function durationBonuses(uint256) external view returns (uint256)",
         "function durations(uint256) external view returns (uint256)",
@@ -554,25 +554,25 @@ class Web3Service {
         "function totalRevenuePaid() external view returns (uint256)",
         "function totalStakedInTier(uint8) external view returns (uint256)",
         "function revenuePoolBITR() external view returns (uint256)",
-        "function revenuePoolSTT() external view returns (uint256)",
+        "function revenuePoolMON() external view returns (uint256)",
         "function pendingRevenueBITR(address) external view returns (uint256)",
-        "function pendingRevenueSTT(address) external view returns (uint256)",
+        "function pendingRevenueMON(address) external view returns (uint256)",
         "function authorizedPools(address) external view returns (bool)",
         
         // View functions - User data
-        "function getUserStakes(address _user) external view returns (tuple(uint256 amount, uint256 startTime, uint8 tierId, uint8 durationOption, uint256 claimedRewardBITR, uint256 rewardDebtBITR, uint256 rewardDebtSTT)[] memory)",
+        "function getUserStakes(address _user) external view returns (tuple(uint256 amount, uint256 startTime, uint8 tierId, uint8 durationOption, uint256 claimedRewardBITR, uint256 rewardDebtBITR, uint256 rewardDebtMON)[] memory)",
         "function getTiers() external view returns (tuple(uint256 baseAPY, uint256 minStake, uint256 revenueShareRate)[] memory)",
         "function getDurationOptions() external view returns (uint256[] memory)",
         "function calculateRewards(address _user, uint256 _index) external view returns (uint256 bitrReward)",
         "function getRevenueShareRate(address _user, uint256 _index) external view returns (uint256)",
-        "function getPendingRewards(address _user, uint256 _index) external view returns (uint256 apyReward, uint256 pendingBITR, uint256 pendingSTT)",
+        "function getPendingRewards(address _user, uint256 _index) external view returns (uint256 apyReward, uint256 pendingBITR, uint256 pendingMON)",
         "function getUserTotalStaked(address _user) external view returns (uint256 total)",
         "function getUserStakeCount(address _user) external view returns (uint256)",
         "function isStakeUnlocked(address _user, uint256 _index) external view returns (bool)",
         "function getTimeUntilUnlock(address _user, uint256 _index) external view returns (uint256)",
         
         // View functions - Contract statistics
-        "function getContractStats() external view returns (uint256 _totalStaked, uint256 _totalRewardsPaid, uint256 _totalRevenuePaid, uint256 _contractBITRBalance, uint256 _contractSTTBalance)",
+        "function getContractStats() external view returns (uint256 _totalStaked, uint256 _totalRewardsPaid, uint256 _totalRevenuePaid, uint256 _contractBITRBalance, uint256 _contractMONBalance)",
         "function getTierStats() external view returns (uint256[] memory tierStaked, uint256[] memory tierAPY, uint256[] memory tierMinStake, uint256[] memory tierRevenueShare)",
         
         // Constants
@@ -597,7 +597,7 @@ class Web3Service {
     if (!this.wallet) {
       throw new Error('Wallet not initialized - Staking contract requires write operations');
     }
-    this.stakingContract = new ethers.Contract(contractAddress, BitredictStakingABI, this.wallet);
+    this.stakingContract = new ethers.Contract(contractAddress, BitrStakingABI, this.wallet);
     
     console.log('✅ BitrStaking contract initialized:', contractAddress);
     return this.stakingContract;
@@ -1186,7 +1186,7 @@ class Web3Service {
       
       // Get current entry fee
       const entryFee = await contract.entryFee();
-      console.log(`💰 Entry fee: ${ethers.formatEther(entryFee)} STT`);
+      console.log(`💰 Entry fee: ${ethers.formatEther(entryFee)} MON`);
       
       // Use Monad-optimized gas estimation
       let gasSettings;
@@ -1206,9 +1206,9 @@ class Web3Service {
       const costEstimate = this.monadGasOptimizer.estimateTransactionCost(gasSettings, entryFee);
       
       console.log(`⛽ Gas limit: ${gasSettings.gasLimit.toString()}`);
-      console.log(`💰 Gas cost: ${costEstimate.gasCostEth} STT`);
-      console.log(`💰 Entry fee: ${costEstimate.valueEth} STT`);
-      console.log(`💰 Total cost: ${costEstimate.totalCostEth} STT`);
+      console.log(`💰 Gas cost: ${costEstimate.gasCostEth} MON`);
+      console.log(`💰 Entry fee: ${costEstimate.valueEth} MON`);
+      console.log(`💰 Total cost: ${costEstimate.totalCostEth} MON`);
       console.log(`⚠️ ${gasSettings.warning}`);
       
       // Check balance
@@ -1216,7 +1216,7 @@ class Web3Service {
       const balance = await this.provider.getBalance(walletAddress);
       
       if (balance < costEstimate.totalCost) {
-        throw new Error(`Insufficient balance. Need ${costEstimate.totalCostEth} STT, have ${ethers.formatEther(balance)} STT`);
+        throw new Error(`Insufficient balance. Need ${costEstimate.totalCostEth} MON, have ${ethers.formatEther(balance)} MON`);
       }
       
       // Place slip with Monad-optimized gas settings
@@ -1274,7 +1274,7 @@ class Web3Service {
       const costEstimate = this.monadGasOptimizer.estimateTransactionCost(gasSettings);
       
       console.log(`⛽ Gas limit: ${gasSettings.gasLimit.toString()}`);
-      console.log(`💰 Total cost: ${costEstimate.totalCostEth} STT`);
+      console.log(`💰 Total cost: ${costEstimate.totalCostEth} MON`);
       console.log(`⚠️ ${gasSettings.warning}`);
       
       // Check balance
@@ -1282,7 +1282,7 @@ class Web3Service {
       const balance = await this.provider.getBalance(walletAddress);
       
       if (balance < costEstimate.totalCost) {
-        throw new Error(`Insufficient balance for evaluation. Need ${costEstimate.totalCostEth} STT, have ${ethers.formatEther(balance)} STT`);
+        throw new Error(`Insufficient balance for evaluation. Need ${costEstimate.totalCostEth} MON, have ${ethers.formatEther(balance)} MON`);
       }
       
       // Execute evaluation with Monad-optimized gas settings
@@ -1756,7 +1756,7 @@ class Web3Service {
       }
 
       // Calculate creation fee
-      const creationFee = useBitr ? 50n * 10n ** 18n : 1n * 10n ** 18n; // 50 BITR or 1 STT
+      const creationFee = useBitr ? 50n * 10n ** 18n : 1n * 10n ** 18n; // 50 BITR or 1 MON
       const totalRequired = creationFee + BigInt(creatorStake);
 
       // Use gas estimator for robust gas estimation
@@ -1772,14 +1772,14 @@ class Web3Service {
       console.log(`⛽ Gas estimation method: ${gasEstimate.method}`);
       console.log(`⛽ Estimated gas: ${gasEstimate.estimate.toString()}`);
       console.log(`⛽ Gas limit with buffer: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} STT`);
+      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} MON`);
 
       // Check balance
       const walletAddress = this.getWalletAddress();
       const balanceCheck = await this.gasEstimator.checkBalance(walletAddress, gasEstimate.totalCost);
       
       if (!balanceCheck.hasSufficientBalance) {
-        throw new Error(`Insufficient balance. Need ${ethers.formatEther(balanceCheck.totalCost)} STT, have ${ethers.formatEther(balanceCheck.balance)} STT`);
+        throw new Error(`Insufficient balance. Need ${ethers.formatEther(balanceCheck.totalCost)} MON, have ${ethers.formatEther(balanceCheck.balance)} MON`);
       }
 
       // Get optimal gas price
@@ -1802,7 +1802,7 @@ class Web3Service {
           console.log(`✅ BITR approved: ${approveTx.hash}`);
         }
       } else {
-        // Use native STT
+        // Use native MON
         txOptions.value = totalRequired;
       }
 
@@ -1858,7 +1858,7 @@ class Web3Service {
       console.log(`⛽ Gas estimation method: ${gasEstimate.method}`);
       console.log(`⛽ Estimated gas: ${gasEstimate.estimate.toString()}`);
       console.log(`⛽ Gas limit with buffer: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} STT`);
+      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} MON`);
 
       // Check balance
       const walletAddress = this.getWalletAddress();
@@ -1888,7 +1888,7 @@ class Web3Service {
           console.log(`✅ BITR approved for bet: ${approveTx.hash}`);
         }
       } else {
-        // Use native STT
+        // Use native MON
         txOptions.value = amount;
       }
 
@@ -1929,7 +1929,7 @@ class Web3Service {
       console.log(`⛽ Gas estimation method: ${gasEstimate.method}`);
       console.log(`⛽ Estimated gas: ${gasEstimate.estimate.toString()}`);
       console.log(`⛽ Gas limit with buffer: ${gasEstimate.gasLimit.toString()}`);
-      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} STT`);
+      console.log(`💰 Total cost: ${ethers.formatEther(gasEstimate.totalCost)} MON`);
 
       // Check balance
       const walletAddress = this.getWalletAddress();
@@ -1959,7 +1959,7 @@ class Web3Service {
           console.log(`✅ BITR approved for liquidity: ${approveTx.hash}`);
         }
       } else {
-        // Use native STT
+        // Use native MON
         txOptions.value = amount;
       }
 

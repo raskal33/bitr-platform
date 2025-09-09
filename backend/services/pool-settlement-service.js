@@ -11,29 +11,29 @@ class PoolSettlementService {
     this.wallet = new ethers.Wallet(process.env.ORACLE_PRIVATE_KEY || process.env.ORACLE_SIGNER_PRIVATE_KEY, this.provider);
     
     // Try to load contract ABIs with multiple path attempts
-    let BitredictPoolABI, GuidedOracleABI;
+    let BitrPoolABI, GuidedOracleABI;
     
-    // Try multiple possible paths for BitredictPool ABI
+    // Try multiple possible paths for BitrPool ABI
     const poolPaths = [
-      './solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-      '../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json',
-      '../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json'
+      './solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+      '../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json',
+      '../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json'
     ];
     
-    BitredictPoolABI = null;
+    BitrPoolABI = null;
     for (const path of poolPaths) {
       try {
-        BitredictPoolABI = require(path).abi;
-        console.log(`✅ BitredictPool ABI loaded successfully from: ${path}`);
+        BitrPoolABI = require(path).abi;
+        console.log(`✅ BitrPool ABI loaded successfully from: ${path}`);
         break;
       } catch (error) {
         // Continue to next path
       }
     }
     
-    if (!BitredictPoolABI) {
-      console.warn('⚠️ BitredictPool ABI not found in any path, using minimal ABI');
-      BitredictPoolABI = [
+    if (!BitrPoolABI) {
+      console.warn('⚠️ BitrPool ABI not found in any path, using minimal ABI');
+      BitrPoolABI = [
         'event MarketResolved(uint256 indexed marketId, string outcome)',
         'function resolveMarket(uint256 marketId, string outcome) external'
       ];
@@ -66,14 +66,14 @@ class PoolSettlementService {
     }
     
     // Initialize contracts only if addresses are available
-    if (config.blockchain.contractAddresses?.bitredictPool) {
+    if (config.blockchain.contractAddresses?.bitrPool) {
       this.poolContract = new ethers.Contract(
-        config.blockchain.contractAddresses.bitredictPool,
-        BitredictPoolABI,
+        config.blockchain.contractAddresses.bitrPool,
+        BitrPoolABI,
         this.wallet
       );
     } else {
-      console.warn('⚠️ BitredictPool contract address not configured');
+      console.warn('⚠️ BitrPool contract address not configured');
       this.poolContract = null;
     }
     

@@ -449,7 +449,7 @@ class FootballOracleBot {
   /**
    * Generate market ID for football prediction
    * Format: keccak256(abi.encodePacked(fixtureId))
-   * This matches the new BitredictPool contract expectations
+   * This matches the new BitrPool contract expectations
    */
   generateMarketId(fixtureId, outcomeType, predictedOutcome) {
     // For the new contract, we use just the fixture ID and hash it
