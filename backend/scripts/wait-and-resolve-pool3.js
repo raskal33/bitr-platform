@@ -20,17 +20,17 @@ async function waitAndResolvePool3() {
     console.log(`Wallet: ${wallet.address}`);
     
     // Load contract ABIs
-    const BitredictPoolABI = require('../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json').abi;
+    const BitrPoolABI = require('../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json').abi;
     
     // Initialize contract
-    const bitredictPool = new ethers.Contract(process.env.BITREDICT_POOL_ADDRESS, BitredictPoolABI, wallet);
+    const bitrPool = new ethers.Contract(process.env.BITR_POOL_ADDRESS, BitrPoolABI, wallet);
     
     console.log('Contract initialized');
     
     const poolId = 3;
     
     // Get pool details
-    const pool = await bitredictPool.pools(poolId);
+    const pool = await bitrPool.pools(poolId);
     const eventEndTime = Number(pool.eventEndTime);
     const currentTime = Math.floor(Date.now() / 1000);
     
@@ -63,16 +63,16 @@ async function waitAndResolvePool3() {
         // Resolve with 2-1 home win (Udinese wins)
         const outcome = ethers.encodeBytes32String("Udinese Wins");
         
-        const gasEstimate = await bitredictPool.settlePool.estimateGas(poolId, outcome);
+        const gasEstimate = await bitrPool.settlePool.estimateGas(poolId, outcome);
         
-        const tx = await bitredictPool.settlePool(poolId, outcome, { gasLimit: gasEstimate + BigInt(50000) });
+        const tx = await bitrPool.settlePool(poolId, outcome, { gasLimit: gasEstimate + BigInt(50000) });
         console.log(`Transaction hash: ${tx.hash}`);
         
         const receipt = await tx.wait();
         console.log(`✅ Pool 3 resolved! Block: ${receipt.blockNumber}`);
         
         // Check pool state after resolution
-        const poolAfter = await bitredictPool.pools(poolId);
+        const poolAfter = await bitrPool.pools(poolId);
         console.log(`\n📊 Pool State After Resolution:`);
         console.log(`Pool Settled: ${poolAfter.settled ? '✅ Yes' : '❌ No'}`);
         console.log(`Result: ${ethers.decodeBytes32String(poolAfter.result)}`);
@@ -81,26 +81,26 @@ async function waitAndResolvePool3() {
         // Test claiming
         console.log('\n💰 Testing Claim...');
         try {
-          const claimed = await bitredictPool.claimed(poolId, wallet.address);
+          const claimed = await bitrPool.claimed(poolId, wallet.address);
           console.log(`Already Claimed: ${claimed ? '✅ Yes' : '❌ No'}`);
           
           if (!claimed) {
-            const claimGasEstimate = await bitredictPool.claim.estimateGas(poolId);
+            const claimGasEstimate = await bitrPool.claim.estimateGas(poolId);
             
-            const claimTx = await bitredictPool.claim(poolId, { gasLimit: claimGasEstimate + BigInt(50000) });
+            const claimTx = await bitrPool.claim(poolId, { gasLimit: claimGasEstimate + BigInt(50000) });
             console.log(`Claim transaction hash: ${claimTx.hash}`);
             
             const claimReceipt = await claimTx.wait();
             console.log(`✅ Claim successful! Block: ${claimReceipt.blockNumber}`);
             
             // Check what was claimed
-            const finalPool = await bitredictPool.pools(poolId);
+            const finalPool = await bitrPool.pools(poolId);
             console.log(`Pool Creator Side Won: ${finalPool.creatorSideWon ? '✅ Yes' : '❌ No'}`);
             console.log(`Pool Result: ${ethers.decodeBytes32String(finalPool.result)}`);
             
             // Check our stakes
-            const lpStake = await bitredictPool.lpStakes(poolId, wallet.address);
-            const bettorStake = await bitredictPool.bettorStakes(poolId, wallet.address);
+            const lpStake = await bitrPool.lpStakes(poolId, wallet.address);
+            const bettorStake = await bitrPool.bettorStakes(poolId, wallet.address);
             console.log(`Our LP Stake: ${ethers.formatEther(lpStake)} BITR`);
             console.log(`Our Bettor Stake: ${ethers.formatEther(bettorStake)} BITR`);
             

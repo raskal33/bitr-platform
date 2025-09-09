@@ -7,7 +7,7 @@ class ReputationManager {
   }
 
   /**
-   * Update user reputation (integrates both BitredictPool and Oddyssey)
+   * Update user reputation (integrates both BitrPool and Oddyssey)
    */
   async updateUserReputation(userAddress, reputationDelta) {
     try {
@@ -166,9 +166,9 @@ class ReputationManager {
   }
 
   /**
-   * Get reputation points for BitredictPool actions
+   * Get reputation points for BitrPool actions
    */
-  getBitredictPoolReputationPoints(action) {
+  getBitrPoolReputationPoints(action) {
     const actions = {
       0: 4,   // POOL_CREATED
       1: 8,   // POOL_FILLED_ABOVE_60
@@ -187,7 +187,7 @@ class ReputationManager {
    */
   getReputationPointsForAction(actionType, value = null) {
     const actionPoints = {
-      // BitredictPool actions
+      // BitrPool actions
       'POOL_CREATED': 4,
       'BET_PLACED': 2,
       'BET_WON': 3,

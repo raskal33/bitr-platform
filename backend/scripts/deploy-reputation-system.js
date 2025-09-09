@@ -91,7 +91,7 @@ async function deployReputationSystem() {
     console.log('\n📋 Next Steps:');
     console.log('1. Update config.js with the contract address:');
     console.log(`   reputationSystem: "${reputationSystem.target}"`);
-    console.log('2. Update BitredictPool contract to use ReputationSystem');
+    console.log('2. Update BitrPool contract to use ReputationSystem');
     console.log('3. Update OptimisticOracle contract to use ReputationSystem');
     console.log('4. Start the reputation sync service');
     console.log('5. Authorize backend indexer as reputation updater');

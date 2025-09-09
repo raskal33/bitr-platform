@@ -18,10 +18,10 @@ async function verifyContract() {
     const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
     
     console.log(`Wallet: ${wallet.address}`);
-    console.log(`BitredictPool Address: ${process.env.BITREDICT_POOL_ADDRESS}`);
+    console.log(`BitrPool Address: ${process.env.BITR_POOL_ADDRESS}`);
     
     // Check if contract exists
-    const code = await provider.getCode(process.env.BITREDICT_POOL_ADDRESS);
+    const code = await provider.getCode(process.env.BITR_POOL_ADDRESS);
     if (code === '0x') {
       console.log('❌ No contract deployed at this address');
       return;
@@ -29,51 +29,51 @@ async function verifyContract() {
     console.log(`✅ Contract deployed (code length: ${code.length})`);
     
     // Load contract ABI
-    const BitredictPoolABI = require('../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json').abi;
+    const BitrPoolABI = require('../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json').abi;
     
     // Initialize contract
-    const bitredictPool = new ethers.Contract(process.env.BITREDICT_POOL_ADDRESS, BitredictPoolABI, wallet);
+    const bitrPool = new ethers.Contract(process.env.BITR_POOL_ADDRESS, BitrPoolABI, wallet);
     
     console.log('\n📋 Testing Contract Interface:');
     
     // Test basic functions
     try {
-      const poolCount = await bitredictPool.poolCount();
+      const poolCount = await bitrPool.poolCount();
       console.log(`✅ poolCount(): ${poolCount}`);
     } catch (e) {
       console.log(`❌ poolCount() failed: ${e.message}`);
     }
     
     try {
-      const creationFee = await bitredictPool.creationFee();
+      const creationFee = await bitrPool.creationFee();
       console.log(`✅ creationFee(): ${ethers.formatEther(creationFee)}`);
     } catch (e) {
       console.log(`❌ creationFee() failed: ${e.message}`);
     }
     
     try {
-      const minPoolStake = await bitredictPool.minPoolStake();
+      const minPoolStake = await bitrPool.minPoolStake();
       console.log(`✅ minPoolStake(): ${ethers.formatEther(minPoolStake)}`);
     } catch (e) {
       console.log(`❌ minPoolStake() failed: ${e.message}`);
     }
     
     try {
-      const bitrToken = await bitredictPool.bitrToken();
+      const bitrToken = await bitrPool.bitrToken();
       console.log(`✅ bitrToken(): ${bitrToken}`);
     } catch (e) {
       console.log(`❌ bitrToken() failed: ${e.message}`);
     }
     
     try {
-      const guidedOracle = await bitredictPool.guidedOracle();
+      const guidedOracle = await bitrPool.guidedOracle();
       console.log(`✅ guidedOracle(): ${guidedOracle}`);
     } catch (e) {
       console.log(`❌ guidedOracle() failed: ${e.message}`);
     }
     
     try {
-      const optimisticOracle = await bitredictPool.optimisticOracle();
+      const optimisticOracle = await bitrPool.optimisticOracle();
       console.log(`✅ optimisticOracle(): ${optimisticOracle}`);
     } catch (e) {
       console.log(`❌ optimisticOracle() failed: ${e.message}`);
@@ -82,7 +82,7 @@ async function verifyContract() {
     // Test if createPool function exists
     console.log('\n🔧 Testing createPool function:');
     
-    const createPoolFunction = BitredictPoolABI.find(item => 
+    const createPoolFunction = BitrPoolABI.find(item => 
       item.type === 'function' && item.name === 'createPool'
     );
     
@@ -116,7 +116,7 @@ async function verifyContract() {
     };
     
     try {
-      const encodedData = bitredictPool.interface.encodeFunctionData('createPool', [
+      const encodedData = bitrPool.interface.encodeFunctionData('createPool', [
         testParams.predictedOutcome,
         testParams.odds,
         testParams.creatorStake,
@@ -141,7 +141,7 @@ async function verifyContract() {
       
       try {
         // Try to call the function with a static call to see if it exists
-        const result = await bitredictPool.createPool.staticCall(
+        const result = await bitrPool.createPool.staticCall(
           testParams.predictedOutcome,
           testParams.odds,
           testParams.creatorStake,
@@ -159,7 +159,7 @@ async function verifyContract() {
         console.log('✅ Function exists and can be called');
       } catch (e) {
         console.log(`❌ Function call failed: ${e.message}`);
-        console.log('This might indicate the contract at this address is not the expected BitredictPool contract');
+        console.log('This might indicate the contract at this address is not the expected BitrPool contract');
       }
       
     } catch (e) {
