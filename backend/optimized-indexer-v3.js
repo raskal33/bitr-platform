@@ -53,7 +53,7 @@ class OptimizedIndexerV3 {
     };
     
     // Contract addresses
-    this.poolAddress = config.blockchain.contractAddresses.bitredictPool;
+    this.poolAddress = config.blockchain.contractAddresses.bitrPool;
     this.oracleAddress = config.blockchain.contractAddresses.guidedOracle;
     this.oddysseyAddress = config.blockchain.contractAddresses.oddyssey;
     this.reputationAddress = config.blockchain.contractAddresses.reputationSystem;

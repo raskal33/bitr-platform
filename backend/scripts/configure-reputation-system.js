@@ -14,7 +14,7 @@ async function configureReputationSystem() {
 
     // Contract addresses
     const reputationSystemAddress = config.blockchain.contractAddresses?.reputationSystem;
-    const bitredictPoolAddress = config.blockchain.contractAddresses?.bitredictPool;
+    const bitrPoolAddress = config.blockchain.contractAddresses?.bitrPool;
     const optimisticOracleAddress = config.blockchain.contractAddresses?.optimisticOracle;
 
     if (!reputationSystemAddress) {
@@ -22,30 +22,30 @@ async function configureReputationSystem() {
     }
 
     console.log(`🎯 ReputationSystem: ${reputationSystemAddress}`);
-    console.log(`🏊 BitredictPool: ${bitredictPoolAddress}`);
+    console.log(`🏊 BitrPool: ${bitrPoolAddress}`);
     console.log(`🔮 OptimisticOracle: ${optimisticOracleAddress}\n`);
 
     // Load contract ABIs
     const reputationSystemABI = require('../../solidity/artifacts/contracts/ReputationSystem.sol/ReputationSystem.json').abi;
-    const bitredictPoolABI = require('../../solidity/artifacts/contracts/BitredictPool.sol/BitredictPool.json').abi;
+    const bitrPoolABI = require('../../solidity/artifacts/contracts/BitrPool.sol/BitrPool.json').abi;
     const optimisticOracleABI = require('../../solidity/artifacts/contracts/OptimisticOracle.sol/OptimisticOracle.json').abi;
 
     // Create contract instances
     const reputationSystem = new ethers.Contract(reputationSystemAddress, reputationSystemABI, wallet);
-    const bitredictPool = bitredictPoolAddress ? new ethers.Contract(bitredictPoolAddress, bitredictPoolABI, wallet) : null;
+    const bitrPool = bitrPoolAddress ? new ethers.Contract(bitrPoolAddress, bitrPoolABI, wallet) : null;
     const optimisticOracle = optimisticOracleAddress ? new ethers.Contract(optimisticOracleAddress, optimisticOracleABI, wallet) : null;
 
-    console.log('🔧 Step 1: Configure BitredictPool...');
-    if (bitredictPool) {
+    console.log('🔧 Step 1: Configure BitrPool...');
+    if (bitrPool) {
       try {
-        const tx1 = await bitredictPool.setReputationSystem(reputationSystemAddress);
+        const tx1 = await bitrPool.setReputationSystem(reputationSystemAddress);
         await tx1.wait();
-        console.log(`✅ BitredictPool configured: ${tx1.hash}`);
+        console.log(`✅ BitrPool configured: ${tx1.hash}`);
       } catch (error) {
-        console.warn(`⚠️ BitredictPool configuration failed (might not have setReputationSystem function):`, error.message);
+        console.warn(`⚠️ BitrPool configuration failed (might not have setReputationSystem function):`, error.message);
       }
     } else {
-      console.warn('⚠️ BitredictPool address not configured, skipping...');
+      console.warn('⚠️ BitrPool address not configured, skipping...');
     }
 
     console.log('\n🔧 Step 2: Configure OptimisticOracle...');
@@ -137,7 +137,7 @@ async function configureReputationSystem() {
     console.log('\n🎉 ReputationSystem configuration completed!');
     console.log('\n📋 Summary:');
     console.log(`✅ ReputationSystem deployed at: ${reputationSystemAddress}`);
-    console.log(`${bitredictPool ? '✅' : '⚠️'} BitredictPool ${bitredictPool ? 'configured' : 'skipped'}`);
+    console.log(`${bitrPool ? '✅' : '⚠️'} BitrPool ${bitrPool ? 'configured' : 'skipped'}`);
     console.log(`${optimisticOracle ? '✅' : '⚠️'} OptimisticOracle ${optimisticOracle ? 'configured' : 'skipped'}`);
     console.log(`✅ Indexer authorized: ${indexerAddress}`);
     console.log(`✅ Initial reputation data synced`);

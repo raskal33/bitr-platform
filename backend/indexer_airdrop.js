@@ -11,7 +11,7 @@ class AirdropIndexer {
     this.bitrTokenAddress = config.blockchain.contractAddresses.bitrToken;
     this.stakingAddress = config.blockchain.contractAddresses.stakingContract;
     this.faucetAddress = config.blockchain.contractAddresses.bitrFaucet;
-    this.poolAddress = config.blockchain.contractAddresses.bitredictPool;
+    this.poolAddress = config.blockchain.contractAddresses.bitrPool;
     
     // BITR Token ABI (ERC20 + custom events)
     this.bitrTokenABI = [

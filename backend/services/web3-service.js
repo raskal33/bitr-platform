@@ -473,7 +473,7 @@ class Web3Service {
       ];
     }
     
-    // BitredictPool needs write operations, so require wallet
+    // BitrPool needs write operations, so require wallet
     if (!this.wallet) {
       throw new Error('Wallet not initialized - BitrPool contract requires write operations');
     }
@@ -1528,7 +1528,7 @@ class Web3Service {
         throw new Error('Prize claiming is not yet available');
       }
       
-      // BitredictPool contract errors
+      // BitrPool contract errors
       else if (message.includes('pool settled')) {
         throw new Error('Pool has already been settled');
       } else if (message.includes('betting period ended')) {

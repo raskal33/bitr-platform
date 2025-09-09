@@ -24,7 +24,7 @@ class LoggingConfig {
       context: {
         ...context,
         nodeEnv: process.env.NODE_ENV,
-        service: context.service || 'bitredict-backend',
+        service: context.service || 'bitr-backend',
         version: process.env.npm_package_version || '1.0.0'
       }
     };

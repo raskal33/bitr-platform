@@ -135,7 +135,7 @@ class GasEstimator {
   getPredefinedGasLimit(functionName, args) {
     // Monad-optimized gas limits (conservative since gas_limit is charged)
     const limits = {
-      // BitredictPool functions - reduced for Monad efficiency
+      // BitrPool functions - reduced for Monad efficiency
       'createPool': 5000000n, // Reduced from 9M - Monad charges gas_limit!
       'placeBet': 300000n, // Reduced from 500k
       'addLiquidity': 250000n, // Reduced from 400k
@@ -302,7 +302,7 @@ class GasEstimator {
   }
 
   /**
-   * Estimate gas for BitredictPool createPool with specific optimizations
+   * Estimate gas for BitrPool createPool with specific optimizations
    */
   async estimateCreatePoolGas(poolData, options = {}) {
     const {
@@ -359,7 +359,7 @@ class GasEstimator {
   }
 
   /**
-   * Estimate gas for BitredictPool placeBet with optimizations
+   * Estimate gas for BitrPool placeBet with optimizations
    */
   async estimatePlaceBetGas(poolId, amount, options = {}) {
     // Get pool info to determine token type
@@ -378,7 +378,7 @@ class GasEstimator {
   }
 
   /**
-   * Estimate gas for BitredictPool addLiquidity with optimizations
+   * Estimate gas for BitrPool addLiquidity with optimizations
    */
   async estimateAddLiquidityGas(poolId, amount, options = {}) {
     // Get pool info to determine token type

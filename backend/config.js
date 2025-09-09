@@ -66,7 +66,7 @@ module.exports = {
     adminKey: process.env.ADMIN_KEY,
     cors: {
       origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [
-        'https://bitredict.vercel.app',
+        'https://bitr-front-ap9z.vercel.app',
         'https://bitredict.io',
         'https://bitr-front-ap9z.vercel.app',
         'https://predict-linux.vercel.app',

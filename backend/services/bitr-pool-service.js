@@ -1,5 +1,5 @@
 /**
- * BitredictPool Service
+ * BitrPool Service
  * 
  * Manages prediction pools, settlements, and pool-related operations
  */
@@ -7,7 +7,7 @@
 const Web3Service = require('./web3-service.js');
 const db = require('../db/db.js');
 
-class BitredictPoolService {
+class BitrPoolService {
   constructor() {
     this.web3Service = null;
     this.bitredictPoolContract = null;
@@ -352,4 +352,4 @@ class BitredictPoolService {
   }
 }
 
-module.exports = BitredictPoolService;
+module.exports = BitrPoolService;
