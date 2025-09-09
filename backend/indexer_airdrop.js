@@ -445,7 +445,7 @@ class AirdropIndexer {
       await this.updateStatistic('total_faucet_claims', 1, true);
       await this.updateStatistic('total_bitr_distributed_faucet', parseFloat(ethers.formatEther(value)), true);
 
-      console.log(`Faucet claim: ${to} claimed ${ethers.formatEther(value)} BITR (had STT activity: ${hadSTTActivity})`);
+      console.log(`Faucet claim: ${to} claimed ${ethers.formatEther(value)} BITR (had MON activity: ${hadSTTActivity})`);
       
     } catch (error) {
       console.error('Error handling faucet claim:', error);

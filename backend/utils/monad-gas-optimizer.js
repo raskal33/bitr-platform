@@ -36,6 +36,7 @@ class MonadGasOptimizer {
       
       // Fallback gas limits for different operation types (optimized based on actual usage)
       fallbackLimits: {
+        createPool: 2000000,     // 2M gas for creating pools (optimized for Monad)
         placeSlip: 3000000,      // 3M gas for placing slips (based on successful tx)
         evaluateSlip: 1500000,   // 1.5M gas for evaluation
         claimPrize: 800000,      // 800K gas for claiming

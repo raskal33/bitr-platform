@@ -14,10 +14,10 @@ async function deployReputationSystem() {
 
     // Check balance
     const balance = await provider.getBalance(wallet.address);
-    console.log(`💰 Deployer balance: ${ethers.formatEther(balance)} STT\n`);
+    console.log(`💰 Deployer balance: ${ethers.formatEther(balance)} MON\n`);
 
     if (balance < ethers.parseEther('1')) {
-      throw new Error('Insufficient balance for deployment (need at least 1 STT)');
+      throw new Error('Insufficient balance for deployment (need at least 1 MON)');
     }
 
     // Load contract artifacts

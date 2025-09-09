@@ -12,7 +12,7 @@ class GasEstimator {
     this.monadSettings = monadSettings || {
       baseFee: '50000000000', // 50 gwei
       priorityFee: '2000000000', // 2 gwei
-      maxGasLimit: 30000000, // 30M gas
+      maxGasLimit: 5000000, // 5M gas (practical limit for most operations)
       gasCharging: 'gas_limit' // Charges gas_limit, not gas_used
     };
   }
@@ -416,7 +416,7 @@ class GasEstimator {
       formatted: {
         gasLimit: gasEstimate.gasLimit.toString(),
         gasPrice: ethers.formatUnits(gasPrice.gasPrice, 'gwei') + ' gwei',
-        totalCost: ethers.formatEther(gasEstimate.totalCost) + ' STT'
+        totalCost: ethers.formatEther(gasEstimate.totalCost) + ' MON'
       }
     };
   }

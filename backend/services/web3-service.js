@@ -376,7 +376,7 @@ class Web3Service {
       // Complete fallback ABI matching actual BitrPool contract
       BitrPoolABI = [
         // Core pool functions
-        "function createPool(bytes32 _predictedOutcome, uint256 _odds, uint256 _creatorStake, uint256 _eventStartTime, uint256 _eventEndTime, string memory _league, string memory _category, string memory _region, bool _isPrivate, uint256 _maxBetPerUser, bool _useBitr, uint8 _oracleType, bytes32 _marketId) external payable",
+        "function createPool(bytes32 _predictedOutcome, uint256 _odds, uint256 _creatorStake, uint256 _eventStartTime, uint256 _eventEndTime, string memory _league, string memory _category, uint8 _marketType, bool _isPrivate, uint256 _maxBetPerUser, bool _useBitr, uint8 _oracleType, bytes32 _marketId) external payable",
         "function placeBet(uint256 poolId, uint256 amount) external payable",
         "function addLiquidity(uint256 poolId, uint256 amount) external payable",
         "function withdrawLiquidity(uint256 poolId) external",
@@ -1865,7 +1865,7 @@ class Web3Service {
       const balanceCheck = await this.gasEstimator.checkBalance(walletAddress, gasEstimate.totalCost);
       
       if (!balanceCheck.hasSufficientBalance) {
-        throw new Error(`Insufficient balance for bet. Need ${ethers.formatEther(balanceCheck.totalCost)} STT, have ${ethers.formatEther(balanceCheck.balance)} STT`);
+        throw new Error(`Insufficient balance for bet. Need ${ethers.formatEther(balanceCheck.totalCost)} MON, have ${ethers.formatEther(balanceCheck.balance)} MON`);
       }
 
       // Get optimal gas price
@@ -1936,7 +1936,7 @@ class Web3Service {
       const balanceCheck = await this.gasEstimator.checkBalance(walletAddress, gasEstimate.totalCost);
       
       if (!balanceCheck.hasSufficientBalance) {
-        throw new Error(`Insufficient balance for liquidity. Need ${ethers.formatEther(balanceCheck.totalCost)} STT, have ${ethers.formatEther(balanceCheck.balance)} STT`);
+        throw new Error(`Insufficient balance for liquidity. Need ${ethers.formatEther(balanceCheck.totalCost)} MON, have ${ethers.formatEther(balanceCheck.balance)} MON`);
       }
 
       // Get optimal gas price
