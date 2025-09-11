@@ -217,9 +217,9 @@ class OddysseyResultsResolver {
         mr.match_id as fixture_id,
         mr.home_score,
         mr.away_score,
-        mr.outcome_1x2,
-        mr.outcome_ou25,
-        mr.resolved_at,
+        mr.result_1x2,
+        mr.result_ou25,
+        mr.finished_at,
         f.home_team,
         f.away_team,
         f.league_name,
@@ -232,7 +232,7 @@ class OddysseyResultsResolver {
     if (matchResult.rows.length > 0) {
       const match = matchResult.rows[0];
       const hasScores = match.home_score !== null && match.away_score !== null;
-      const hasOutcomes = match.outcome_1x2 !== null && match.outcome_ou25 !== null;
+      const hasOutcomes = match.result_1x2 !== null && match.result_ou25 !== null;
       const isFinished = ['FT', 'AET', 'PEN', 'FT_PEN'].includes(match.status);
       
       const isResolved = isFinished && hasScores && hasOutcomes;
@@ -247,9 +247,9 @@ class OddysseyResultsResolver {
         homeScore: match.home_score,
         awayScore: match.away_score,
         score: hasScores ? `${match.home_score}-${match.away_score}` : null,
-        result1x2: match.outcome_1x2,
-        resultOU25: match.outcome_ou25,
-        finishedAt: match.resolved_at
+        result1x2: match.result_1x2,
+        resultOU25: match.result_ou25,
+        finishedAt: match.finished_at
       };
     }
 

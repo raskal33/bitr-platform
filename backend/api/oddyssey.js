@@ -4,6 +4,7 @@ const db = require('../db/db');
 const { asyncHandler, validateDateParam } = require('../utils/validation');
 const { rateLimitMiddleware } = require('../config/redis');
 const { serializeBigInts } = require('../utils/bigint-serializer');
+const AnalyticsMiddleware = require('../middleware/analytics-middleware');
 
 // ROOT CAUSE FIX: Import simple bulletproof service
 const SimpleBulletproofService = require('../services/simple-bulletproof-service');
@@ -12,6 +13,7 @@ const CycleFormatNormalizer = require('../services/cycle-format-normalizer');
 // ROOT CAUSE FIX: Initialize simple bulletproof service
 const bulletproofService = new SimpleBulletproofService();
 const cycleNormalizer = new CycleFormatNormalizer();
+const analyticsMiddleware = new AnalyticsMiddleware();
 
 // Helper function to decode selection hash to readable format
 function decodeSelection(selection, betType, pred) {
@@ -659,7 +661,10 @@ router.get('/stats', cacheMiddleware(60000), asyncHandler(async (req, res) => {
 }));
 
 // Place a new slip (submit predictions) with strict contract validation
-router.post('/place-slip', rateLimitMiddleware((req) => `place-slip:${req.body.playerAddress}`, 3, 60), async (req, res) => {
+router.post('/place-slip', 
+  rateLimitMiddleware((req) => `place-slip:${req.body.playerAddress}`, 3, 60),
+  analyticsMiddleware.collectSlipData(),
+  async (req, res) => {
   try {
     const { playerAddress, predictions, cycleId } = req.body;
 

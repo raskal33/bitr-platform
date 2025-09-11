@@ -664,10 +664,10 @@ class UnifiedResultsManager {
   async ensureFixtureInMatchesTable(result) {
     try {
       await db.query(`
-        INSERT INTO oracle.matches (
-          match_id, home_team, away_team, match_time, league, status
+        INSERT INTO oracle.fixtures (
+          id, home_team, away_team, starting_at, league_name, status
         ) VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (match_id) DO NOTHING
+        ON CONFLICT (id) DO NOTHING
       `, [
         result.fixture_id,
         result.home_team,

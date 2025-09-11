@@ -14,6 +14,22 @@ class Web3Service {
     OVER_UNDER: 1
   };
   
+  OracleType = {
+    GUIDED: 0,
+    OPEN: 1
+  };
+  
+  MarketType = {
+    MONEYLINE: 0,
+    OVER_UNDER: 1,
+    BOTH_TEAMS_SCORE: 2,
+    HALF_TIME: 3,
+    DOUBLE_CHANCE: 4,
+    CORRECT_SCORE: 5,
+    FIRST_GOAL: 6,
+    CUSTOM: 7
+  };
+  
   MoneylineResult = {
     NotSet: 0,
     HomeWin: 1,
@@ -105,12 +121,8 @@ class Web3Service {
       }
 
       // Initialize gas estimator with BitrPool contract for guided markets
-      this.bitrPoolContract = new ethers.Contract(
-        config.blockchain.contractAddresses.bitrPool,
-        this.getBitrPoolABI(),
-        this.provider
-      );
-      this.gasEstimator = new GasEstimator(this.provider, this.bitrPoolContract, this.monadGasOptimizer.settings);
+      // Note: BitrPool contract will be properly initialized with wallet in getBitrPoolContract()
+      this.gasEstimator = new GasEstimator(this.provider, null, this.monadGasOptimizer.settings);
       
       this.isInitialized = true;
       console.log('✅ Web3Service fully initialized');
@@ -341,6 +353,11 @@ class Web3Service {
     }
 
     const contractAddress = process.env.BITR_POOL_ADDRESS;
+    
+    // Update gas estimator with the contract once it's initialized
+    if (this.gasEstimator) {
+      this.gasEstimator.contract = this.bitrPoolContract;
+    }
     if (!contractAddress) {
       throw new Error('BITR_POOL_ADDRESS environment variable not set');
     }
@@ -479,7 +496,18 @@ class Web3Service {
     }
     this.bitrPoolContract = new ethers.Contract(contractAddress, BitrPoolABI, this.wallet);
     
+    // Update gas estimator with the contract
+    if (this.gasEstimator) {
+      this.gasEstimator.contract = this.bitrPoolContract;
+    }
+    
     console.log('✅ BitrPool contract initialized:', contractAddress);
+    console.log('✅ BitrPool ABI loaded with createPool function');
+    if (this.bitrPoolContract.interface && this.bitrPoolContract.interface.functions) {
+      console.log('✅ Contract methods available:', Object.keys(this.bitrPoolContract.interface.functions));
+    } else {
+      console.log('✅ Contract interface loaded (functions not available for logging)');
+    }
     return this.bitrPoolContract;
   }
 
@@ -817,7 +845,7 @@ class Web3Service {
         
         // View functions - Core data
         "function bondToken() external view returns (address)",
-        "function bitredictPool() external view returns (address)",
+        "function bitrPool() external view returns (address)",
         "function markets(bytes32) external view returns (bytes32 marketId, uint256 poolId, string question, string category, bytes32 proposedOutcome, address proposer, uint256 proposalTime, uint256 proposalBond, address disputer, uint256 disputeTime, uint256 disputeBond, bytes32 finalOutcome, uint8 state, uint256 eventEndTime, bool bondsClaimed)",
         "function userReputation(address) external view returns (uint256)",
         "function allMarkets(uint256) external view returns (bytes32)",
@@ -1732,8 +1760,6 @@ class Web3Service {
    */
   async createPool(poolData, options = {}) {
     try {
-      const contract = await this.getBitrPoolContract();
-      
       const {
         predictedOutcome,
         odds,
@@ -1742,7 +1768,7 @@ class Web3Service {
         eventEndTime,
         league,
         category,
-        region,
+        marketType = 7, // Default to CUSTOM if not provided
         isPrivate = false,
         maxBetPerUser = 0,
         useBitr = false,
@@ -1759,6 +1785,9 @@ class Web3Service {
       const creationFee = useBitr ? 50n * 10n ** 18n : 1n * 10n ** 18n; // 50 BITR or 1 MON
       const totalRequired = creationFee + BigInt(creatorStake);
 
+      // Ensure contract is initialized before gas estimation
+      const contract = await this.getBitrPoolContract();
+      
       // Use gas estimator for robust gas estimation
       const gasEstimate = await this.gasEstimator.estimateCreatePoolGas(poolData, {
         buffer: 30, // 30% buffer for pool creation
@@ -1808,6 +1837,8 @@ class Web3Service {
 
       console.log(`🚀 Creating pool with gas limit: ${gasEstimate.gasLimit.toString()}`);
       console.log(`💰 Gas price type: ${gasPriceData.type}`);
+      console.log(`🔍 Contract createPool function available:`, typeof contract.createPool);
+      console.log(`🔍 Contract address:`, await contract.getAddress());
 
       const tx = await contract.createPool(
         ethers.keccak256(ethers.toUtf8Bytes(predictedOutcome)),
@@ -1817,7 +1848,7 @@ class Web3Service {
         eventEndTime,
         league,
         category,
-        region,
+        marketType, // Use the marketType parameter
         isPrivate,
         maxBetPerUser,
         useBitr,

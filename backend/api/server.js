@@ -9,8 +9,10 @@ const matchesRoutes = require('./matches');
 const AirdropEligibilityCalculator = require('../airdrop/eligibility_calculator');
 const db = require('../db/monitored-db'); // Use monitored database wrapper
 const analyticsRouter = require('./analytics');
+const enhancedAnalyticsRouter = require('./enhanced-analytics');
 const socialRouter = require('./social');
 const adminRouter = require('./admin');
+const IndexerAnalyticsBridge = require('../services/indexer-analytics-bridge');
 
 // Import health monitoring components
 const healthMonitor = require('../services/health-monitor');
@@ -30,6 +32,7 @@ class BitredictAPI {
     this.app = express();
     this.provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
     this.startupInitializer = new StartupInitializer();
+    this.indexerBridge = new IndexerAnalyticsBridge();
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -47,6 +50,9 @@ class BitredictAPI {
       
       // Initialize deployment startup sequence (fixtures + Oddyssey matches)
       await this.startupInitializer.checkAndInitialize();
+      
+      // Initialize indexer analytics bridge
+      await this.indexerBridge.start();
       
       console.log('✅ All services initialized successfully');
     } catch (error) {
@@ -260,6 +266,7 @@ class BitredictAPI {
     
     // Analytics routes
     this.app.use('/api/analytics', analyticsRouter);
+    this.app.use('/api/enhanced-analytics', enhancedAnalyticsRouter);
 
     // Matches routes
     this.app.use('/api/matches', matchesRoutes);
@@ -295,6 +302,9 @@ class BitredictAPI {
     // Guided markets routes
     this.app.use('/api/guided-markets', require('./guided-markets'));
 
+    // BitR Pool routes (prediction pools)
+    this.app.use('/api/bitr-pool', require('./bitr-pool'));
+
     // User routes
     this.app.use('/api/users', require('./users'));
 
@@ -303,6 +313,9 @@ class BitredictAPI {
     
     // Cycle monitoring routes
     this.app.use('/api/cycle-monitoring', require('./cycle-monitoring'));
+
+    // Optimistic Oracle routes (NEW)
+    this.app.use('/api/optimistic-oracle', require('./optimistic-oracle'));
 
     // Error handling
     this.app.use(this.errorHandler.bind(this));
@@ -2136,6 +2149,18 @@ if (require.main === module) {
         console.log('✅ HTTP server closed');
       }
       
+      // Stop analytics services gracefully
+      try {
+        if (global.analyticsService && typeof global.analyticsService.gracefulStop === 'function') {
+          await global.analyticsService.gracefulStop();
+        }
+        if (global.airdropService && typeof global.airdropService.stop === 'function') {
+          await global.airdropService.stop();
+        }
+      } catch (error) {
+        console.error('⚠️ Error stopping analytics services:', error.message);
+      }
+
       // Close database connections
       const db = require('../db/db');
       await db.disconnect();
@@ -2156,13 +2181,31 @@ if (require.main === module) {
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught Exception:', error);
-    gracefulShutdown('uncaughtException');
+    
+    // Don't shutdown for port conflicts during startup - let the server handle it
+    if (error.code === 'EADDRINUSE') {
+      console.error('🚨 Port already in use. Please stop existing processes and try again.');
+      process.exit(1);
+    } else {
+      gracefulShutdown('uncaughtException');
+    }
   });
   
   // Handle unhandled promise rejections
   process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-    gracefulShutdown('unhandledRejection');
+    
+    // Only shutdown for critical errors, not analytics initialization failures
+    const reasonStr = String(reason);
+    if (reasonStr.includes('ECONNREFUSED') || 
+        reasonStr.includes('ENOTFOUND') || 
+        reasonStr.includes('listen EADDRINUSE') ||
+        reasonStr.includes('Cannot read properties of null')) {
+      console.error('🛑 Critical error detected, initiating graceful shutdown...');
+      gracefulShutdown('unhandledRejection');
+    } else {
+      console.error('⚠️ Non-critical unhandled rejection, continuing operation...');
+    }
   });
   
   // Start the server

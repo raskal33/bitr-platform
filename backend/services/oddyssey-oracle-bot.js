@@ -479,15 +479,37 @@ class OddysseyOracleBot {
       if (receipt.status === 1) {
         console.log(`🎉 Cycle ${cycle.cycle_id} resolved successfully!`);
         
-        // Update database
+        // First, update matches_data with actual results
+        await this.updateCycleMatchResults(cycle.cycle_id, matchResults);
+        
+        // Update database - BOTH cycle tables for consistency
         await db.query(`
           UPDATE oracle.oddyssey_cycles 
           SET is_resolved = true, resolution_tx_hash = $1, resolved_at = NOW()
           WHERE cycle_id = $2
         `, [tx.hash, cycle.cycle_id]);
 
+        // Also update current_oddyssey_cycle to maintain consistency
+        await db.query(`
+          UPDATE oracle.current_oddyssey_cycle 
+          SET is_resolved = true, resolution_tx_hash = $1, resolved_at = NOW()
+          WHERE cycle_id = $2
+        `, [tx.hash, cycle.cycle_id]);
+
         // Sync resolution to oddyssey schema
         await this.syncBridge.syncCycleResolution(cycle.cycle_id);
+        
+        // Trigger immediate evaluation after resolution
+        try {
+          console.log(`🎯 Triggering immediate evaluation for resolved cycle ${cycle.cycle_id}...`);
+          const AutoEvaluationTrigger = require('./auto-evaluation-trigger');
+          const evaluationTrigger = new AutoEvaluationTrigger();
+          await evaluationTrigger.evaluateCycleIfReady(cycle.cycle_id);
+          console.log(`✅ Immediate evaluation completed for cycle ${cycle.cycle_id}`);
+        } catch (evalError) {
+          console.error(`⚠️ Failed to trigger immediate evaluation for cycle ${cycle.cycle_id}:`, evalError.message);
+          // Don't throw - evaluation will be picked up by the cron job
+        }
 
       } else {
         throw new Error('Resolution transaction failed');
@@ -624,6 +646,62 @@ class OddysseyOracleBot {
         isRunning: this.isRunning,
         error: error.message
       };
+    }
+  }
+
+  /**
+   * Update cycle matches_data with actual match results
+   */
+  async updateCycleMatchResults(cycleId, matchResults) {
+    try {
+      console.log(`🔄 Updating matches_data for cycle ${cycleId} with actual results...`);
+      
+      // Get current cycle data
+      const cycleQuery = `SELECT matches_data FROM oracle.oddyssey_cycles WHERE cycle_id = $1`;
+      const cycleResult = await db.query(cycleQuery, [cycleId]);
+      
+      if (cycleResult.rows.length === 0) {
+        throw new Error(`Cycle ${cycleId} not found`);
+      }
+      
+      const currentMatchesData = cycleResult.rows[0].matches_data;
+      
+      // Update matches_data with actual results
+      const updatedMatchesData = currentMatchesData.map(match => {
+        const result = matchResults.find(r => r.fixtureId === match.id);
+        if (result) {
+          return {
+            ...match,
+            result: {
+              moneyline: result.moneyline,
+              overUnder: result.overUnder
+            }
+          };
+        }
+        return match;
+      });
+      
+      // Update BOTH cycle tables with the updated matches_data
+      const updateQuery = `
+        UPDATE oracle.oddyssey_cycles 
+        SET matches_data = $1, updated_at = NOW()
+        WHERE cycle_id = $2
+      `;
+      
+      const updateCurrentQuery = `
+        UPDATE oracle.current_oddyssey_cycle 
+        SET matches_data = $1, updated_at = NOW()
+        WHERE cycle_id = $2
+      `;
+      
+      await db.query(updateQuery, [JSON.stringify(updatedMatchesData), cycleId]);
+      await db.query(updateCurrentQuery, [JSON.stringify(updatedMatchesData), cycleId]);
+      
+      console.log(`✅ Updated matches_data for cycle ${cycleId} in both tables`);
+      
+    } catch (error) {
+      console.error(`❌ Failed to update matches_data for cycle ${cycleId}:`, error);
+      throw error;
     }
   }
 

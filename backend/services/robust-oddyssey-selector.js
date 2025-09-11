@@ -202,20 +202,20 @@ class RobustOddysseySelector {
       const date = targetDate || new Date().toISOString().split('T')[0];
 
       // Clear existing matches for the cycle date (if any)
-      await db.query('DELETE FROM oracle.matches WHERE DATE(match_time) >= $1', [date]);
+      await db.query('DELETE FROM oracle.fixtures WHERE DATE(starting_at) >= $1', [date]);
 
       // Insert all selected matches (may span multiple days)
       for (const match of selectedMatches) {
         await db.query(`
-          INSERT INTO oracle.matches (
-            match_id, home_team, away_team, match_time, league, status,
+          INSERT INTO oracle.fixtures (
+            id, home_team, away_team, starting_at, league_name, status,
             created_at, updated_at
           ) VALUES ($1, $2, $3, $4, $5, 'scheduled', NOW(), NOW())
-          ON CONFLICT (match_id) DO UPDATE SET
+          ON CONFLICT (id) DO UPDATE SET
             home_team = EXCLUDED.home_team,
             away_team = EXCLUDED.away_team,
-            match_time = EXCLUDED.match_time,
-            league = EXCLUDED.league,
+            starting_at = EXCLUDED.starting_at,
+            league_name = EXCLUDED.league_name,
             updated_at = NOW()
         `, [
           match.fixture_id,

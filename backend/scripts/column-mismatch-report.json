@@ -1,0 +1,525 @@
+{
+  "timestamp": "2025-09-09T22:49:58.578Z",
+  "totalIssues": 35,
+  "filesAffected": 13,
+  "issues": [
+    {
+      "file": "/home/leon/bitr/backend/services/robust-oddyssey-selector.js",
+      "line": 205,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/robust-oddyssey-selector.js",
+      "line": 205,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/unified-results-manager.js",
+      "line": 667,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/oddyssey-manager.js",
+      "line": 102,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/oddyssey-manager.js",
+      "line": 102,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/oddyssey-manager.js",
+      "line": 102,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/database/perfect-schema.sql",
+      "line": 289,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/database/perfect-schema.sql",
+      "line": 289,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/database/perfect-schema.sql",
+      "line": 289,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+      "line": 73,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+      "line": 70,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+      "line": 70,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/db/db.js",
+      "line": 159,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/setup-perfect-database.js",
+      "line": 104,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/oddyssey-analytics-service.js",
+      "line": 275,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/oddyssey-analytics-service.js",
+      "line": 275,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/cycle-monitor.js",
+      "line": 295,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/services/cycle-monitor.js",
+      "line": 295,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+      "line": 73,
+      "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+      "table": "oracle.matches",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+      "line": 70,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+      "line": 70,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/db/oddyssey_schema.sql",
+      "line": 58,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/db/football_markets_schema.sql",
+      "line": 119,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/db/football_markets_schema.sql",
+      "line": 119,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/db/oddyssey_indexer_schema.sql",
+      "line": 76,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/db/oddyssey_indexer_schema.sql",
+      "line": 76,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    },
+    {
+      "file": "/home/leon/bitr/backend/api/oddyssey.js",
+      "line": 606,
+      "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+      "table": "multiple",
+      "severity": "HIGH"
+    }
+  ],
+  "issuesByFile": {
+    "/home/leon/bitr/backend/services/robust-oddyssey-selector.js": [
+      {
+        "file": "/home/leon/bitr/backend/services/robust-oddyssey-selector.js",
+        "line": 205,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/services/robust-oddyssey-selector.js",
+        "line": 205,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/services/unified-results-manager.js": [
+      {
+        "file": "/home/leon/bitr/backend/services/unified-results-manager.js",
+        "line": 667,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/services/oddyssey-manager.js": [
+      {
+        "file": "/home/leon/bitr/backend/services/oddyssey-manager.js",
+        "line": 102,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/services/oddyssey-manager.js",
+        "line": 102,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/services/oddyssey-manager.js",
+        "line": 102,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/database/perfect-schema.sql": [
+      {
+        "file": "/home/leon/bitr/backend/database/perfect-schema.sql",
+        "line": 289,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/database/perfect-schema.sql",
+        "line": 289,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/database/perfect-schema.sql",
+        "line": 289,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/scripts/detect-column-mismatches.js": [
+      {
+        "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+        "line": 73,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+        "line": 70,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+        "line": 70,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+        "line": 73,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+        "line": 70,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/scripts/detect-column-mismatches.js",
+        "line": 70,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/db/db.js": [
+      {
+        "file": "/home/leon/bitr/backend/db/db.js",
+        "line": 159,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/setup-perfect-database.js": [
+      {
+        "file": "/home/leon/bitr/backend/setup-perfect-database.js",
+        "line": 104,
+        "issue": "Found \"oracle.matches\" - should be \"oracle.fixtures\"",
+        "table": "oracle.matches",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/services/oddyssey-analytics-service.js": [
+      {
+        "file": "/home/leon/bitr/backend/services/oddyssey-analytics-service.js",
+        "line": 275,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/services/oddyssey-analytics-service.js",
+        "line": 275,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/services/cycle-monitor.js": [
+      {
+        "file": "/home/leon/bitr/backend/services/cycle-monitor.js",
+        "line": 295,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/services/cycle-monitor.js",
+        "line": 295,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/db/oddyssey_schema.sql": [
+      {
+        "file": "/home/leon/bitr/backend/db/oddyssey_schema.sql",
+        "line": 58,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/db/football_markets_schema.sql": [
+      {
+        "file": "/home/leon/bitr/backend/db/football_markets_schema.sql",
+        "line": 119,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/db/football_markets_schema.sql",
+        "line": 119,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/db/oddyssey_indexer_schema.sql": [
+      {
+        "file": "/home/leon/bitr/backend/db/oddyssey_indexer_schema.sql",
+        "line": 76,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/db/oddyssey_indexer_schema.sql",
+        "line": 76,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ],
+    "/home/leon/bitr/backend/api/oddyssey.js": [
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      },
+      {
+        "file": "/home/leon/bitr/backend/api/oddyssey.js",
+        "line": 606,
+        "issue": "Found \".resolved_at\" - should be \".finished_at\"",
+        "table": "multiple",
+        "severity": "HIGH"
+      }
+    ]
+  }
+}

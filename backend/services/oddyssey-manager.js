@@ -99,19 +99,19 @@ class OddysseyManager {
    */
   async getDailyMatches() {
     try {
-      console.log('🎯 Getting daily Oddyssey matches from oracle.matches table...');
+      console.log('🎯 Getting daily Oddyssey matches from oracle.fixtures table...');
 
       // Get today's date
       const today = new Date().toISOString().split('T')[0];
       
-      // Get matches with odds from oracle.matches and oracle.fixture_odds tables
+      // Get matches with odds from oracle.fixtures and oracle.fixture_odds tables
       const result = await db.query(`
         SELECT 
-          m.match_id,
+          m.id as match_id,
           m.home_team,
           m.away_team,
-          m.match_time,
-          m.league,
+          m.starting_at as match_time,
+          m.league_name as league,
           m.status,
           -- Get odds data from fixture_odds table
           MAX(CASE WHEN o.market_id = '1' AND o.label = 'Home' THEN o.value END) as home_odds,
@@ -119,11 +119,11 @@ class OddysseyManager {
           MAX(CASE WHEN o.market_id = '1' AND o.label = 'Away' THEN o.value END) as away_odds,
           MAX(CASE WHEN o.market_id = '80' AND o.label = 'Over' AND o.total = '2.500000' THEN o.value END) as over_25_odds,
           MAX(CASE WHEN o.market_id = '80' AND o.label = 'Under' AND o.total = '2.500000' THEN o.value END) as under_25_odds
-        FROM oracle.matches m
-        LEFT JOIN oracle.fixture_odds o ON m.match_id = o.fixture_id
-        WHERE DATE(m.match_time) >= $1
-        GROUP BY m.match_id, m.home_team, m.away_team, m.match_time, m.league, m.status
-        ORDER BY m.match_time ASC
+        FROM oracle.fixtures m
+        LEFT JOIN oracle.fixture_odds o ON m.id = o.fixture_id
+        WHERE DATE(m.starting_at) >= $1
+        GROUP BY m.id, m.home_team, m.away_team, m.starting_at, m.league_name, m.status
+        ORDER BY m.starting_at ASC
       `, [today]);
       
       if (result.rows.length === 0) {

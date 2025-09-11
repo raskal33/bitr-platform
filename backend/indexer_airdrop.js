@@ -1,11 +1,13 @@
 const { ethers } = require('ethers');
 const config = require('./config');
+const AnalyticsDataCollector = require('./services/analytics-data-collector');
 
 class AirdropIndexer {
   constructor() {
     this.provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
     this.isRunning = false;
     this.lastIndexedBlock = 0;
+    this.analyticsCollector = new AnalyticsDataCollector();
     
     // Contract addresses (update with actual deployed addresses)
     this.bitrTokenAddress = config.blockchain.contractAddresses.bitrToken;
@@ -474,6 +476,17 @@ class AirdropIndexer {
         event.blockNumber,
         new Date(block.timestamp * 1000)
       ]);
+
+      // Also collect analytics data
+      await this.analyticsCollector.collectUserActivity(user, 'staking_activity', {
+        eventType: 'stake',
+        amount: amount.toString(),
+        txHash: event.transactionHash,
+        blockNumber: event.blockNumber,
+        tierId: parseInt(tier),
+        durationOption: parseInt(duration),
+        additionalData: { source: 'airdrop_indexer' }
+      });
 
       // Record as BITR activity
       await db.query(`

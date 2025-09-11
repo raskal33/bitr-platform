@@ -98,18 +98,19 @@ router.get('/match/:matchId', async (req, res) => {
     
     const result = await db.query(`
       SELECT 
-        m.match_id,
+        m.id as match_id,
         m.home_team,
         m.away_team,
-        m.match_time,
-        m.league,
-        mr.outcome_1x2,
-        mr.outcome_ou25,
-        mr.full_score,
-        mr.resolved_at
-      FROM oracle.matches m
-      LEFT JOIN oracle.match_results mr ON m.match_id = mr.match_id
-      WHERE m.match_id = $1
+        m.starting_at as match_time,
+        m.league_name as league,
+        mr.result_1x2,
+        mr.result_ou25,
+        mr.home_score,
+        mr.away_score,
+        mr.finished_at
+      FROM oracle.fixtures m
+      LEFT JOIN oracle.match_results mr ON m.id = mr.match_id
+      WHERE m.id = $1
     `, [matchId]);
     
     if (result.rows.length === 0) {
@@ -127,10 +128,12 @@ router.get('/match/:matchId', async (req, res) => {
         matchTime: match.match_time,
         league: match.league,
         result: {
-          outcome1x2: match.outcome_1x2,
-          outcomeOU25: match.outcome_ou25,
-          fullScore: match.full_score,
-          resolvedAt: match.resolved_at
+          outcome1x2: match.result_1x2,
+          outcomeOU25: match.result_ou25,
+          homeScore: match.home_score,
+          awayScore: match.away_score,
+          fullScore: match.home_score && match.away_score ? `${match.home_score}-${match.away_score}` : null,
+          resolvedAt: match.finished_at
         }
       }
     });
@@ -156,19 +159,20 @@ router.post('/matches/batch', async (req, res) => {
     
     const result = await db.query(`
       SELECT 
-        m.match_id,
+        m.id as match_id,
         m.home_team,
         m.away_team,
-        m.match_time,
-        m.league,
-        mr.outcome_1x2,
-        mr.outcome_ou25,
-        mr.full_score,
-        mr.resolved_at
-      FROM oracle.matches m
-      LEFT JOIN oracle.match_results mr ON m.match_id = mr.match_id
-      WHERE m.match_id = ANY($1)
-      ORDER BY m.match_time ASC
+        m.starting_at as match_time,
+        m.league_name as league,
+        mr.result_1x2,
+        mr.result_ou25,
+        mr.home_score,
+        mr.away_score,
+        mr.finished_at
+      FROM oracle.fixtures m
+      LEFT JOIN oracle.match_results mr ON m.id = mr.match_id
+      WHERE m.id = ANY($1)
+      ORDER BY m.starting_at ASC
     `, [matchIds]);
     
     const matches = result.rows.map(match => ({
@@ -178,10 +182,12 @@ router.post('/matches/batch', async (req, res) => {
       matchTime: match.match_time,
       league: match.league,
       result: {
-        outcome1x2: match.outcome_1x2,
-        outcomeOU25: match.outcome_ou25,
-        fullScore: match.full_score,
-        resolvedAt: match.resolved_at
+        outcome1x2: match.result_1x2,
+        outcomeOU25: match.result_ou25,
+        homeScore: match.home_score,
+        awayScore: match.away_score,
+        fullScore: match.home_score && match.away_score ? `${match.home_score}-${match.away_score}` : null,
+        resolvedAt: match.finished_at
       }
     }));
     
@@ -207,15 +213,15 @@ router.get('/oddyssey/current', async (req, res) => {
         dgm.match_id,
         m.home_team,
         m.away_team,
-        m.match_time,
-        m.league,
-        mr.outcome_1x2,
-        mr.outcome_ou25,
-        mr.resolved_at IS NOT NULL as is_resolved
+        m.starting_at as match_time,
+        m.league_name as league,
+        mr.result_1x2,
+        mr.result_ou25,
+        mr.finished_at IS NOT NULL as is_resolved
       FROM oddyssey.daily_games dg
       JOIN oracle.daily_game_matches dgm ON dg.game_date = dgm.game_date
-      JOIN oracle.matches m ON dgm.match_id = m.match_id
-      LEFT JOIN oracle.match_results mr ON m.match_id = mr.match_id
+      JOIN oracle.fixtures m ON dgm.match_id = m.id
+      LEFT JOIN oracle.match_results mr ON m.id = mr.match_id
       WHERE dg.game_date = $1
       ORDER BY dgm.id ASC
     `, [today]);
@@ -228,8 +234,8 @@ router.get('/oddyssey/current', async (req, res) => {
       league: match.league,
       isResolved: match.is_resolved,
       result: match.is_resolved ? {
-        outcome1x2: match.outcome_1x2,
-        outcomeOU25: match.outcome_ou25
+        outcome1x2: match.result_1x2,
+        outcomeOU25: match.result_ou25
       } : null
     }));
     

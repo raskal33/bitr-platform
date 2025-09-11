@@ -405,7 +405,7 @@ class GuidedMarketService {
       eventEndTime: eventEndTime,
       league: cryptocurrency.name,
       category: 'cryptocurrency',
-      region: 'Global',
+      marketType: 7, // MarketType.CUSTOM for cryptocurrency markets
       isPrivate: isPrivate,
       maxBetPerUser: BigInt(maxBetPerUser) * 10n ** 18n,
       useBitr: useBitr,

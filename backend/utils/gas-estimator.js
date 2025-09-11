@@ -10,9 +10,9 @@ class GasEstimator {
     
     // Monad-specific settings
     this.monadSettings = monadSettings || {
-      baseFee: '50000000000', // 50 gwei
-      priorityFee: '2000000000', // 2 gwei
-      maxGasLimit: 5000000, // 5M gas (practical limit for most operations)
+      baseFee: '52000000000', // 52 gwei (fixed)
+      priorityFee: '0', // 0 gwei priority fee
+      maxGasLimit: 2000000, // 2M gas (reduced from 5M)
       gasCharging: 'gas_limit' // Charges gas_limit, not gas_used
     };
   }
@@ -23,30 +23,34 @@ class GasEstimator {
   async estimateGasWithFallback(functionName, args, options = {}) {
     const {
       buffer = 20, // Default 20% buffer
-      maxGasLimit = this.monadSettings.maxGasLimit, // Use Monad's 30M gas limit
+      maxGasLimit = this.monadSettings.maxGasLimit, // Use Monad's 2M gas limit
       value = 0n,
       ...otherOptions
     } = options;
 
     try {
-      // Method 1: Try contract's estimateGas method
-      console.log(`⛽ Estimating gas for ${functionName} using contract method...`);
-      const estimate = await this.contract[functionName].estimateGas(...args, {
-        value,
-        ...otherOptions
-      });
-      
-      const gasLimit = this.calculateGasLimit(estimate, buffer, maxGasLimit);
-      const totalCost = await this.calculateMonadTotalCost(gasLimit, value);
-      
-      return {
-        method: 'contract_estimate',
-        estimate,
-        gasLimit,
-        totalCost,
-        monadWarning: 'Monad charges gas_limit, not gas_used!',
-        error: null
-      };
+      // Method 1: Try contract's estimateGas method (if contract is available)
+      if (this.contract && this.contract[functionName]) {
+        console.log(`⛽ Estimating gas for ${functionName} using contract method...`);
+        const estimate = await this.contract[functionName].estimateGas(...args, {
+          value,
+          ...otherOptions
+        });
+        
+        const gasLimit = this.calculateGasLimit(estimate, buffer, maxGasLimit);
+        const totalCost = await this.calculateMonadTotalCost(gasLimit, value);
+        
+        return {
+          method: 'contract_estimate',
+          estimate,
+          gasLimit,
+          totalCost,
+          monadWarning: 'Monad charges gas_limit, not gas_used!',
+          error: null
+        };
+      } else {
+        throw new Error('Contract not available for gas estimation');
+      }
     } catch (error) {
       console.warn(`⚠️ Contract gas estimation failed: ${error.message}`);
       
@@ -136,7 +140,7 @@ class GasEstimator {
     // Monad-optimized gas limits (conservative since gas_limit is charged)
     const limits = {
       // BitrPool functions - reduced for Monad efficiency
-      'createPool': 5000000n, // Reduced from 9M - Monad charges gas_limit!
+      'createPool': 2000000n, // Reduced to 2M - Monad charges gas_limit!
       'placeBet': 300000n, // Reduced from 500k
       'addLiquidity': 250000n, // Reduced from 400k
       'withdrawLiquidity': 200000n, // Reduced from 300k
@@ -204,12 +208,8 @@ class GasEstimator {
     }
 
     try {
-      // Get current gas price
-      const currentGasPrice = await this.provider.getFeeData();
-      
-      // Calculate optimal gas price with small buffer
-      const baseGasPrice = currentGasPrice.gasPrice || 20000000000n; // 20 gwei default
-      const optimalGasPrice = (baseGasPrice * 110n) / 100n; // 10% buffer
+      // Use fixed gas price of 52 gwei
+      const optimalGasPrice = 52000000000n; // 52 gwei fixed
       
       // Cache the result
       this.gasPriceCache = {
@@ -225,9 +225,9 @@ class GasEstimator {
     } catch (error) {
       console.warn(`⚠️ Gas price estimation failed: ${error.message}`);
       
-      // Fallback to default gas price
+      // Fallback to fixed gas price
       const fallbackPrice = {
-        gasPrice: 20000000000n, // 20 gwei
+        gasPrice: 52000000000n, // 52 gwei fixed
         maxFeePerGas: null,
         maxPriorityFeePerGas: null
       };
@@ -345,7 +345,7 @@ class GasEstimator {
       eventEndTime,
       league,
       category,
-      region,
+      7, // MarketType.CUSTOM
       isPrivate,
       maxBetPerUser,
       useBitr,
@@ -353,7 +353,7 @@ class GasEstimator {
       marketId
     ], {
       buffer: 30, // 30% buffer for pool creation
-      maxGasLimit: 9000000, // 9M gas limit for pool creation (increased from 2M)
+      maxGasLimit: 2000000, // 2M gas limit for pool creation (reduced from 9M)
       ...txOptions
     });
   }

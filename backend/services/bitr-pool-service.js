@@ -67,7 +67,7 @@ class BitrPoolService {
         eventEndTime,
         league,
         category,
-        region,
+        7, // MarketType.CUSTOM (default for now)
         isPrivate,
         maxBetPerUser,
         useBitr,

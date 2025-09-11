@@ -61,6 +61,12 @@ router.post('/football', async (req, res) => {
       });
     }
 
+    // Validate maxBetPerUser - should be 0 (unlimited) or a reasonable value
+    if (maxBetPerUser !== 0 && (maxBetPerUser < 1 || maxBetPerUser > 100000)) {
+      console.warn(`⚠️ Invalid maxBetPerUser value: ${maxBetPerUser}, setting to 0 (unlimited)`);
+      maxBetPerUser = 0; // Set to 0 (unlimited) if invalid value
+    }
+
     // Validate match date
     const matchTime = new Date(matchDate);
     const now = new Date();
@@ -225,6 +231,18 @@ router.post('/cryptocurrency', async (req, res) => {
       });
     }
 
+    // Validate maxBetPerUser - should be 0 (unlimited) or a reasonable value
+    if (maxBetPerUser !== 0 && (maxBetPerUser < 1 || maxBetPerUser > 100000)) {
+      console.warn(`⚠️ Invalid maxBetPerUser value: ${maxBetPerUser}, setting to 0 (unlimited)`);
+      maxBetPerUser = 0; // Set to 0 (unlimited) if invalid value
+    }
+
+    // Validate maxBetPerUser - should be 0 (unlimited) or a reasonable value
+    if (maxBetPerUser !== 0 && (maxBetPerUser < 1 || maxBetPerUser > 100000)) {
+      console.warn(`⚠️ Invalid maxBetPerUser value: ${maxBetPerUser}, setting to 0 (unlimited)`);
+      maxBetPerUser = 0; // Set to 0 (unlimited) if invalid value
+    }
+
     console.log('💰 Creating guided cryptocurrency market:', {
       cryptocurrency: cryptocurrency.symbol,
       targetPrice,
@@ -257,6 +275,237 @@ router.post('/cryptocurrency', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error creating cryptocurrency market:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/guided-markets/cryptocurrency/prepare
+ * Prepare cryptocurrency market transaction data for frontend wallet integration
+ */
+router.post('/cryptocurrency/prepare', async (req, res) => {
+  try {
+    const {
+      cryptocurrency,
+      targetPrice,
+      direction,
+      timeframe,
+      predictedOutcome,
+      odds,
+      creatorStake,
+      useBitr = false,
+      description = '',
+      isPrivate = false,
+      maxBetPerUser = 0
+    } = req.body;
+
+    // Validate required fields
+    if (!cryptocurrency || !targetPrice || !direction || !timeframe || !predictedOutcome || !odds || !creatorStake) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: cryptocurrency, targetPrice, direction, timeframe, predictedOutcome, odds, creatorStake'
+      });
+    }
+
+    // Validate cryptocurrency object
+    if (!cryptocurrency.symbol || !cryptocurrency.name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cryptocurrency must have symbol and name properties'
+      });
+    }
+
+    // Validate target price
+    if (targetPrice <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Target price must be greater than 0'
+      });
+    }
+
+    // Validate direction
+    if (!['above', 'below'].includes(direction)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Direction must be either "above" or "below"'
+      });
+    }
+
+    // Validate timeframe
+    const validTimeframes = ['1h', '4h', '1d', '1w', '1m'];
+    if (!validTimeframes.includes(timeframe)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid timeframe. Must be one of: 1h, 4h, 1d, 1w, 1m'
+      });
+    }
+
+    // Validate odds range
+    if (odds < 101 || odds > 10000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Odds must be between 1.01x and 100.0x (101-10000 in contract format)'
+      });
+    }
+
+    // Validate stake amounts
+    const minStake = useBitr ? 20 : 20; // Both MON and BITR have same minimum
+    const maxStake = 1000000; // 1M tokens
+
+    if (creatorStake < minStake) {
+      return res.status(400).json({
+        success: false,
+        error: `Creator stake must be at least ${minStake} ${useBitr ? 'BITR' : 'MON'}`
+      });
+    }
+
+    if (creatorStake > maxStake) {
+      return res.status(400).json({
+        success: false,
+        error: 'Creator stake cannot exceed 1,000,000 tokens'
+      });
+    }
+
+    console.log('💰 Preparing guided cryptocurrency market:', {
+      cryptocurrency: cryptocurrency.symbol,
+      targetPrice,
+      direction,
+      timeframe,
+      predictedOutcome,
+      odds: odds / 100,
+      creatorStake,
+      useBitr
+    });
+
+    // Prepare the market data for transaction
+    const marketData = {
+      cryptocurrency,
+      targetPrice,
+      direction,
+      timeframe,
+      predictedOutcome,
+      odds,
+      creatorStake,
+      useBitr,
+      description,
+      isPrivate,
+      maxBetPerUser
+    };
+
+    // Generate market ID
+    const marketId = require('crypto').randomBytes(32).toString('hex');
+
+    // Calculate event times based on timeframe
+    const now = Math.floor(Date.now() / 1000);
+    const timeframeInSeconds = (() => {
+      switch (timeframe) {
+        case '1h': return 3600;
+        case '4h': return 14400;
+        case '1d': return 86400;
+        case '1w': return 604800;
+        case '1m': return 2592000;
+        default: return 86400; // Default to 1 day
+      }
+    })();
+    
+    const eventStartTime = now + timeframeInSeconds;
+    const eventEndTime = eventStartTime + 3600; // 1 hour after start
+
+    // Prepare transaction data (this would normally call the web3 service to prepare the transaction)
+    const transactionData = {
+      contractAddress: process.env.BITR_POOL_CONTRACT_ADDRESS || '0x080dB155ded47b08D9807ad38Be550784D4Df1e6',
+      functionName: 'createPool',
+      parameters: [
+        require('ethers').keccak256(require('ethers').toUtf8Bytes(predictedOutcome)), // predictedOutcome (bytes32)
+        odds, // odds (uint256)
+        require('ethers').parseEther(creatorStake.toString()), // creatorStake (uint256)
+        eventStartTime, // eventStartTime (uint256)
+        eventEndTime, // eventEndTime (uint256)
+        cryptocurrency.name, // league (string)
+        'cryptocurrency', // category (string)
+        7, // marketType (uint8) - MarketType.CUSTOM
+        isPrivate, // isPrivate (bool)
+        maxBetPerUser * (useBitr ? 1e18 : 1e18), // maxBetPerUser (uint256)
+        useBitr, // useBitr (bool)
+        0, // oracleType (uint8) - OracleType.GUIDED
+        '0x' + marketId // marketId (bytes32)
+      ],
+      value: useBitr ? '0' : (creatorStake + 1).toString(), // MON value (stake + 1 MON fee)
+      gasEstimate: '2000000', // Gas estimate
+      totalRequiredWei: useBitr ? (creatorStake + 50).toString() : '0', // Total BITR required (stake + 50 BITR fee)
+      creationFeeWei: useBitr ? '50' : '1', // Creation fee
+      marketDetails: {
+        marketId: '0x' + marketId,
+        category: 'cryptocurrency',
+        cryptocurrency: cryptocurrency.symbol,
+        targetPrice,
+        direction,
+        timeframe,
+        predictedOutcome,
+        odds: odds / 100,
+        creatorStake,
+        useBitr,
+        eventStartTime,
+        eventEndTime
+      }
+    };
+
+    res.json({
+      success: true,
+      data: transactionData
+    });
+
+  } catch (error) {
+    console.error('❌ Error preparing cryptocurrency market:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/guided-markets/cryptocurrency/confirm
+ * Confirm cryptocurrency market creation after successful transaction
+ */
+router.post('/cryptocurrency/confirm', async (req, res) => {
+  try {
+    const { transactionHash, marketDetails } = req.body;
+
+    if (!transactionHash || !marketDetails) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: transactionHash, marketDetails'
+      });
+    }
+
+    console.log('✅ Confirming cryptocurrency market creation:', {
+      transactionHash,
+      marketId: marketDetails.marketId
+    });
+
+    // Here you would typically:
+    // 1. Verify the transaction on the blockchain
+    // 2. Extract the pool ID from the transaction logs
+    // 3. Store the market data in the database
+    // 4. Index the market for search
+
+    // For now, just return success
+    res.json({
+      success: true,
+      data: {
+        transactionHash,
+        marketId: marketDetails.marketId,
+        poolId: 'pending', // Would be extracted from transaction logs
+        status: 'confirmed'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error confirming cryptocurrency market:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -843,6 +1092,12 @@ router.post('/football/prepare', async (req, res) => {
         success: false,
         error: 'Creator stake cannot exceed 1,000,000 tokens'
       });
+    }
+
+    // Validate maxBetPerUser - should be 0 (unlimited) or a reasonable value
+    if (maxBetPerUser !== 0 && (maxBetPerUser < 1 || maxBetPerUser > 100000)) {
+      console.warn(`⚠️ Invalid maxBetPerUser value: ${maxBetPerUser}, setting to 0 (unlimited)`);
+      maxBetPerUser = 0; // Set to 0 (unlimited) if invalid value
     }
 
     // Validate match date

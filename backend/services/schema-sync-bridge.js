@@ -204,9 +204,16 @@ class SchemaSyncBridge {
     try {
       console.log(`🔄 Syncing cycle ${oracleCycleId} resolution...`);
 
-      // Update oddyssey cycle status
+      // Update oddyssey cycle status in BOTH tables
       await db.query(`
         UPDATE oracle.oddyssey_cycles 
+        SET is_resolved = TRUE, resolved_at = NOW(), updated_at = NOW()
+        WHERE cycle_id = $1
+      `, [parseInt(oracleCycleId)]);
+
+      // Also update current_oddyssey_cycle to maintain consistency
+      await db.query(`
+        UPDATE oracle.current_oddyssey_cycle 
         SET is_resolved = TRUE, resolved_at = NOW(), updated_at = NOW()
         WHERE cycle_id = $1
       `, [parseInt(oracleCycleId)]);

@@ -82,9 +82,12 @@ class OddysseyDatabaseSetup {
         final_score NUMERIC DEFAULT 0,
         correct_count INTEGER DEFAULT 0,
         is_evaluated BOOLEAN DEFAULT FALSE,
+        evaluated_at TIMESTAMP WITH TIME ZONE,
         leaderboard_rank INTEGER,
         prize_claimed BOOLEAN DEFAULT FALSE,
-        tx_hash TEXT
+        tx_hash TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
       
       // Oddyssey daily game matches table

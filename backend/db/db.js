@@ -156,13 +156,13 @@ class Database {
   // Oracle operations
   async saveMatch(matchId, homeTeam, awayTeam, matchTime, league) {
     const query = `
-      INSERT INTO oracle.matches (match_id, home_team, away_team, match_time, league)
+      INSERT INTO oracle.fixtures (id, home_team, away_team, starting_at, league_name)
       VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (match_id) DO UPDATE SET
+      ON CONFLICT (id) DO UPDATE SET
         home_team = EXCLUDED.home_team,
         away_team = EXCLUDED.away_team,
-        match_time = EXCLUDED.match_time,
-        league = EXCLUDED.league
+        starting_at = EXCLUDED.starting_at,
+        league_name = EXCLUDED.league_name
       RETURNING *
     `;
     const result = await this.query(query, [matchId, homeTeam, awayTeam, matchTime, league]);

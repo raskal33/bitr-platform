@@ -13,7 +13,7 @@ const db = require('../db/db.js');
 const poolService = new BitrPoolService();
 
 /**
- * GET /api/bitredict-pool/pools
+ * GET /api/bitr-pool/pools
  * Get all active pools
  */
 router.get('/pools', async (req, res) => {
@@ -46,7 +46,7 @@ router.get('/pools', async (req, res) => {
 });
 
 /**
- * GET /api/bitredict-pool/pools/:poolId
+ * GET /api/bitr-pool/pools/:poolId
  * Get specific pool details
  */
 router.get('/pools/:poolId', async (req, res) => {
@@ -87,7 +87,7 @@ router.get('/pools/:poolId', async (req, res) => {
 });
 
 /**
- * POST /api/bitredict-pool/pools
+ * POST /api/bitr-pool/pools
  * Create a new pool
  */
 router.post('/pools', async (req, res) => {
@@ -148,7 +148,7 @@ router.post('/pools', async (req, res) => {
 });
 
 /**
- * POST /api/bitredict-pool/pools/:poolId/bet
+ * POST /api/bitr-pool/pools/:poolId/bet
  * Place a bet on a pool
  */
 router.post('/pools/:poolId/bet', async (req, res) => {
@@ -198,7 +198,7 @@ router.post('/pools/:poolId/bet', async (req, res) => {
 });
 
 /**
- * POST /api/bitredict-pool/pools/:poolId/settle
+ * POST /api/bitr-pool/pools/:poolId/settle
  * Settle a pool (Oracle only)
  */
 router.post('/pools/:poolId/settle', async (req, res) => {
@@ -248,7 +248,7 @@ router.post('/pools/:poolId/settle', async (req, res) => {
 });
 
 /**
- * GET /api/bitredict-pool/user/:address/pools
+ * GET /api/bitr-pool/user/:address/pools
  * Get user's pools
  */
 router.get('/user/:address/pools', async (req, res) => {
@@ -282,7 +282,7 @@ router.get('/user/:address/pools', async (req, res) => {
 });
 
 /**
- * GET /api/bitredict-pool/user/:address/bets
+ * GET /api/bitr-pool/user/:address/bets
  * Get user's bets
  */
 router.get('/user/:address/bets', async (req, res) => {
@@ -328,7 +328,7 @@ router.get('/user/:address/bets', async (req, res) => {
 });
 
 /**
- * GET /api/bitredict-pool/statistics
+ * GET /api/bitr-pool/statistics
  * Get platform statistics
  */
 router.get('/statistics', async (req, res) => {
